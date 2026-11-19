@@ -52,8 +52,13 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          navigateFallbackDenylist: [/^\/api\//],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           runtimeCaching: [
+            {
+              urlPattern: /^\/api\/.*/i,
+              handler: 'NetworkOnly',
+            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',
@@ -97,11 +102,12 @@ export default defineConfig(() => {
             id.endsWith('/vite/dist/client/client.mjs') ||
             id.endsWith('\\vite\\dist\\client\\client.mjs')
           ) {
+            const transformed = code.replace(
+              /const transport = normalizeModuleRunnerTransport\(\(\(\) => \{[\s\S]*?\}\)\(\)\);/,
+              'const transport = normalizeModuleRunnerTransport({ connect() {}, disconnect() {}, send() {} });'
+            );
             return {
-              code: code.replace(
-                'transport.connect(createHMRHandler(handleMessage));',
-                '/* HMR WebSocket disabled */'
-              ),
+              code: transformed,
               map: null,
             };
           }

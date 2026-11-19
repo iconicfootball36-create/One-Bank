@@ -143,12 +143,20 @@ export default function App() {
           bankName: selectedBank!.name,
         });
         const res = await fetch(`/api/monnify/validate-account?${params.toString()}`);
-        const data = (await res.json()) as {
+        const rawText = await res.text();
+        let data: {
           live?: boolean;
           accountName?: string | null;
           bankCode?: string;
           error?: string;
-        };
+        } = {};
+        if (rawText) {
+          try {
+            data = JSON.parse(rawText);
+          } catch {
+            data = {};
+          }
+        }
 
         if (cancelled) return;
 
@@ -348,13 +356,21 @@ export default function App() {
         }),
       });
 
-      const data = (await res.json()) as {
+      const rawText = await res.text();
+      let data: {
         live?: boolean;
         requestSuccessful?: boolean;
         reference?: string;
         status?: TransactionStatus;
         error?: string;
-      };
+      } = {};
+      if (rawText) {
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          data = {};
+        }
+      }
 
       if (!res.ok || !data.requestSuccessful) {
         setTransferError(
