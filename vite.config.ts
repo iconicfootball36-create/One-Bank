@@ -25,8 +25,8 @@ export default defineConfig(() => {
           short_name: 'OneBank',
           description:
             'Digital mobile banking experience for OneBank by Sterling with Naira account management, instant transfers, bank success rate telemetry, and official payment receipts.',
-          theme_color: '#1F2E4D',
-          background_color: '#FFFFFF',
+          theme_color: '#ffffff',
+          background_color: '#ffffff',
           display: 'standalone',
           start_url: '/',
           scope: '/',

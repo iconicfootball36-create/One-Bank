@@ -106,19 +106,44 @@ export const PaymentReceipt: React.FC<PaymentReceiptProps> = ({
           </div>
         </div>
 
-        {/* Amber Status Banner: Transfer Request initiated / Account Credited */}
-        <div className="mx-auto w-[84%] rounded-full bg-[#F7E3AF] py-2 px-4 flex items-center justify-center gap-2 mb-3">
-          <span className="w-4 h-4 rounded-full bg-[#F59E0B] text-white flex items-center justify-center shrink-0">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-              <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </span>
-          <span className="text-[12.5px] font-bold text-[#111827]">
-            {transaction.direction === 'credit'
-              ? 'Account Top-Up Successful'
-              : 'Transfer Request initiated'}
-          </span>
-        </div>
+        {/* Status Banner */}
+        {transaction.status === 'FAILED' ? (
+          <div className="mx-auto w-[84%] rounded-full bg-[#FEE2E2] py-2 px-4 flex items-center justify-center gap-2 mb-3">
+            <span className="w-4 h-4 rounded-full bg-[#D92027] text-white flex items-center justify-center shrink-0">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <span className="text-[12.5px] font-bold text-[#991B1B]">
+              Transaction Failed
+            </span>
+          </div>
+        ) : transaction.status === 'PENDING' ? (
+          <div className="mx-auto w-[84%] rounded-full bg-[#FEF3C7] py-2 px-4 flex items-center justify-center gap-2 mb-3">
+            <span className="w-4 h-4 rounded-full bg-[#F59E0B] text-white flex items-center justify-center shrink-0">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7.5V12l3 2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <span className="text-[12.5px] font-bold text-[#92400E]">
+              Transaction Pending
+            </span>
+          </div>
+        ) : (
+          <div className="mx-auto w-[84%] rounded-full bg-[#F7E3AF] py-2 px-4 flex items-center justify-center gap-2 mb-3">
+            <span className="w-4 h-4 rounded-full bg-[#F59E0B] text-white flex items-center justify-center shrink-0">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <span className="text-[12.5px] font-bold text-[#111827]">
+              {transaction.direction === 'credit'
+                ? 'Account Top-Up Successful'
+                : 'Transfer Request initiated'}
+            </span>
+          </div>
+        )}
 
         {/* Center Transaction Amount */}
         <div className="text-center mb-4">

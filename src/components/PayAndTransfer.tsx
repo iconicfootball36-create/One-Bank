@@ -370,7 +370,7 @@ export const PayAndTransfer: React.FC<PayAndTransferProps> = ({
       </div>
 
       {/* Bottom Navigation Tab Bar (Pay & Transf... Active in Red) */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#F3F4F6] bg-white py-2 px-2 shrink-0">
+      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#F3F4F6] bg-white pt-2 pb-[max(8px,env(safe-area-inset-bottom))] px-2 shrink-0">
         <div className="max-w-2xl mx-auto grid grid-cols-5 items-center">
           {/* Home */}
           <button

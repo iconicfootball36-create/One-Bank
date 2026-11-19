@@ -37,7 +37,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
       .reduce((sum, tx) => sum + tx.amount, 0);
 
   const totalMoneyOut = transactions
-    .filter((tx) => tx.direction !== 'credit')
+    .filter((tx) => tx.direction !== 'credit' && tx.status !== 'FAILED')
     .reduce((sum, tx) => sum + tx.amount, 0);
 
   return (
@@ -264,8 +264,18 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
                         </>
                       )}
                     </p>
-                    <div className="text-[13px] text-[#6B7280] mt-1 tabular-nums">
-                      19/11/2026
+                    <div className="text-[13px] text-[#6B7280] mt-1 tabular-nums flex items-center gap-2">
+                      <span>19/11/2026</span>
+                      {tx.status === 'FAILED' && (
+                        <span className="text-[11px] font-bold text-[#D92027]">
+                          · Failed
+                        </span>
+                      )}
+                      {tx.status === 'PENDING' && (
+                        <span className="text-[11px] font-bold text-[#D97706]">
+                          · Pending
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

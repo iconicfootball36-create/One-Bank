@@ -33,6 +33,8 @@ const STORAGE_KEYS = {
   latestTransaction: 'onebank_latest_transaction_v1',
   profileImage: 'onebank_profile_image_v1',
   notifications: 'onebank_notifications_v1',
+  transactionFailedMode: 'onebank_transaction_failed_mode_v1',
+  transactionPendingMode: 'onebank_transaction_pending_mode_v1',
 } as const;
 
 const INITIAL_TRANSACTION: TransactionRecord = {
@@ -118,6 +120,30 @@ function buildNotificationFromTransaction(
     };
   }
 
+  if (tx.status === 'FAILED') {
+    return {
+      id: `notif-${tx.id}`,
+      title: `Transfer Failed · ${formattedAmt}`,
+      message: `Your transfer of ${formattedAmt} to ${tx.recipientName} (${tx.recipientBank} · ${tx.recipientAccount}) failed. No funds were debited. Ref: ${tx.reference}`,
+      timestamp: `${tx.dateFormatted} · ${tx.timeFormatted}`,
+      type: 'debit',
+      read,
+      transactionId: tx.id,
+    };
+  }
+
+  if (tx.status === 'PENDING') {
+    return {
+      id: `notif-${tx.id}`,
+      title: `Transfer Pending · ${formattedAmt}`,
+      message: `Your transfer of ${formattedAmt} to ${tx.recipientName} (${tx.recipientBank} · ${tx.recipientAccount}) is pending settlement. Ref: ${tx.reference}`,
+      timestamp: `${tx.dateFormatted} · ${tx.timeFormatted}`,
+      type: 'debit',
+      read,
+      transactionId: tx.id,
+    };
+  }
+
   return {
     id: `notif-${tx.id}`,
     title: `Transfer Sent · ${formattedAmt}`,
@@ -156,6 +182,22 @@ function loadStoredProfileImage(): string | null {
   }
 }
 
+function loadStoredTransactionFailedMode(): boolean {
+  try {
+    return window.localStorage.getItem(STORAGE_KEYS.transactionFailedMode) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function loadStoredTransactionPendingMode(): boolean {
+  try {
+    return window.localStorage.getItem(STORAGE_KEYS.transactionPendingMode) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('splash');
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -164,6 +206,12 @@ export default function App() {
   // Account & Form State (persisted across page refreshes)
   const [balance, setBalance] = useState<number>(() => loadStoredBalance());
   const [profileImage, setProfileImage] = useState<string | null>(() => loadStoredProfileImage());
+  const [transactionFailedMode, setTransactionFailedMode] = useState<boolean>(() =>
+    loadStoredTransactionFailedMode()
+  );
+  const [transactionPendingMode, setTransactionPendingMode] = useState<boolean>(() =>
+    loadStoredTransactionPendingMode()
+  );
   const [amountInput, setAmountInput] = useState<string>('0.0');
   const [confirmationAmount, setConfirmationAmount] = useState<number>(0.40);
   const [submittedAmount, setSubmittedAmount] = useState<number>(10.00);
@@ -243,6 +291,28 @@ export default function App() {
       // Ignore storage quota or private mode errors
     }
   }, [profileImage]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEYS.transactionFailedMode,
+        String(transactionFailedMode)
+      );
+    } catch {
+      // Ignore storage quota or private mode errors
+    }
+  }, [transactionFailedMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEYS.transactionPendingMode,
+        String(transactionPendingMode)
+      );
+    } catch {
+      // Ignore storage quota or private mode errors
+    }
+  }, [transactionPendingMode]);
 
   // Load real Nigerian banks directory from Monnify backend on mount
   useEffect(() => {
@@ -511,6 +581,34 @@ export default function App() {
     setTransferError(null);
     const loadingStartedAt = Date.now();
 
+    if (transactionFailedMode) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      finalizeVerifiedTransfer(
+        finalAmount,
+        selectedBank,
+        recipientAccount,
+        recipientName,
+        `OB-FAIL-${Date.now()}`,
+        'FAILED'
+      );
+      setIsProcessingTransfer(false);
+      return;
+    }
+
+    if (transactionPendingMode) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      finalizeVerifiedTransfer(
+        finalAmount,
+        selectedBank,
+        recipientAccount,
+        recipientName,
+        `OB-PEND-${Date.now()}`,
+        'PENDING'
+      );
+      setIsProcessingTransfer(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/monnify/transfer', {
         method: 'POST',
@@ -639,7 +737,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen w-full bg-white text-[#111827] flex flex-col">
+    <div className="min-h-screen w-full bg-white text-[#111827] flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <OfflineIndicator />
       <main className="w-full min-h-screen bg-white flex flex-col flex-1">
         {currentScreen === 'splash' && (
@@ -695,9 +793,19 @@ export default function App() {
           <ProfileScreen
             balance={balance}
             profileImage={profileImage}
+            transactionFailedMode={transactionFailedMode}
+            transactionPendingMode={transactionPendingMode}
             onBack={() => setCurrentScreen('home')}
             onAddMoney={handleAddMoneyToAccount}
             onUpdateProfileImage={setProfileImage}
+            onToggleTransactionFailedMode={(enabled) => {
+              setTransactionFailedMode(enabled);
+              if (enabled) setTransactionPendingMode(false);
+            }}
+            onToggleTransactionPendingMode={(enabled) => {
+              setTransactionPendingMode(enabled);
+              if (enabled) setTransactionFailedMode(false);
+            }}
           />
         )}
 
@@ -752,7 +860,8 @@ export default function App() {
         {currentScreen === 'transfer_submitted_confetti' && (
           <TransferSubmitted
             amount={submittedAmount}
-            recipientName={recipientName}
+            recipientName={latestTransaction.recipientName || recipientName}
+            status={latestTransaction.status}
             confettiDensity="full"
             onViewReceipt={() => setCurrentScreen('payment_receipt')}
             onDone={() => setCurrentScreen('home')}
@@ -762,7 +871,8 @@ export default function App() {
         {currentScreen === 'transfer_submitted_clean' && (
           <TransferSubmitted
             amount={submittedAmount}
-            recipientName={recipientName}
+            recipientName={latestTransaction.recipientName || recipientName}
+            status={latestTransaction.status}
             confettiDensity="settled"
             onViewReceipt={() => setCurrentScreen('payment_receipt')}
             onDone={() => setCurrentScreen('home')}
@@ -805,6 +915,11 @@ export default function App() {
                 })
                 .replace(':', '.')
                 .replace(/\s+/g, '');
+              const txStatus: TransactionStatus = transactionFailedMode
+                ? 'FAILED'
+                : transactionPendingMode
+                  ? 'PENDING'
+                  : 'SUCCESS';
               const tx: TransactionRecord = {
                 id: `tx-${Date.now()}`,
                 amount: amt,
@@ -816,17 +931,25 @@ export default function App() {
                 recipientName: label.toUpperCase(),
                 recipientAccount: recipientAccount || '9042769211',
                 recipientBank: 'STERLING BILLS',
-                reference: `OB-BILL-${Date.now()}`,
+                reference: `${
+                  txStatus === 'FAILED'
+                    ? 'OB-FAIL-'
+                    : txStatus === 'PENDING'
+                      ? 'OB-PEND-'
+                      : 'OB-BILL-'
+                }${Date.now()}`,
                 narration: label,
                 category: 'Bills & Utilities',
                 dateFormatted,
                 timeFormatted,
-                status: 'SUCCESS',
+                status: txStatus,
               };
               setLatestTransaction(tx);
               setTransactions((prev) => [tx, ...prev]);
               setNotifications((prev) => [buildNotificationFromTransaction(tx, false), ...prev]);
-              setBalance((prev) => Math.max(0, Number((prev - amt).toFixed(2))));
+              if (txStatus !== 'FAILED') {
+                setBalance((prev) => Math.max(0, Number((prev - amt).toFixed(2))));
+              }
               setCurrentScreen('transfer_submitted_confetti');
             }}
           />

@@ -1,10 +1,11 @@
 import React from 'react';
 import { StatusBar } from './StatusBar';
-import { formatNaira } from '../data/bankData';
+import { TransactionStatus, formatNaira } from '../data/bankData';
 
 interface TransferSubmittedProps {
   amount: number;
   recipientName: string;
+  status?: TransactionStatus;
   confettiDensity?: 'full' | 'settled';
   onViewReceipt: () => void;
   onDone: () => void;
@@ -13,11 +14,14 @@ interface TransferSubmittedProps {
 export const TransferSubmitted: React.FC<TransferSubmittedProps> = ({
   amount,
   recipientName,
+  status = 'SUCCESS',
   confettiDensity = 'full',
   onViewReceipt,
   onDone,
 }) => {
   const formattedAmount = `₦${formatNaira(amount)}`;
+  const isFailed = status === 'FAILED';
+  const isPending = status === 'PENDING';
 
   return (
     <div className="relative w-full min-h-screen bg-white flex flex-col justify-between overflow-x-hidden select-none">
@@ -45,9 +49,9 @@ export const TransferSubmitted: React.FC<TransferSubmittedProps> = ({
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col items-center px-5 pt-4">
-        {/* Confetti + Teal Checkmark Graphic Area */}
+        {/* Status Icon + Confetti Area */}
         <div className="relative w-64 h-52 flex items-center justify-center mb-3">
-          {confettiDensity === 'full' ? (
+          {!isFailed && !isPending && (confettiDensity === 'full' ? (
             <svg
               className="absolute inset-0 w-full h-full pointer-events-none"
               viewBox="0 0 240 200"
@@ -90,40 +94,99 @@ export const TransferSubmitted: React.FC<TransferSubmittedProps> = ({
               <polygon points="62,92 67,95 64,100 59,97" fill="#E2E8F0" />
               <polygon points="74,158 79,161 76,166 71,163" fill="#F9D5DF" />
             </svg>
-          )}
+          ))}
 
-          {/* Central Teal Checkmark Circle */}
-          <div className="relative z-10 w-[72px] h-[72px] rounded-full bg-[#26B397] flex items-center justify-center shadow-xs">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-              <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
+          {/* Central Status Circle */}
+          {isFailed ? (
+            <div className="relative z-10 w-[76px] h-[76px] rounded-full bg-[#D92027] flex items-center justify-center shadow-xs">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          ) : isPending ? (
+            <div className="relative z-10 w-[76px] h-[76px] rounded-full bg-[#F59E0B] flex items-center justify-center shadow-xs">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.6">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7.5V12l3 2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          ) : (
+            <div className="relative z-10 w-[72px] h-[72px] rounded-full bg-[#26B397] flex items-center justify-center shadow-xs">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          )}
         </div>
 
         {/* Title & Subtitle Copy */}
-        <h2 className="text-[16.5px] font-semibold text-[#111827] text-center mb-3">
-          Transaction Submitted for processing
+        <h2
+          className={`text-[17px] font-bold text-center mb-3 ${
+            isFailed
+              ? 'text-[#D92027]'
+              : isPending
+                ? 'text-[#B45309]'
+                : 'text-[#111827] font-semibold text-[16.5px]'
+          }`}
+        >
+          {isFailed
+            ? 'Transaction Failed'
+            : isPending
+              ? 'Transaction Pending'
+              : 'Transaction Submitted for processing'}
         </h2>
 
         <p className="text-[13.5px] font-medium text-[#1F2937] text-center leading-[1.42] mb-7 px-1">
-          Your transfer of <span className="font-semibold">{formattedAmount}</span> to{' '}
-          <span className="font-semibold uppercase">{recipientName}</span> is currently being
-          processed - absolutely charge-free! Enjoy seamless banking with zero deductions.
+          {isFailed ? (
+            <>
+              Your transfer of <span className="font-semibold">{formattedAmount}</span> to{' '}
+              <span className="font-semibold uppercase">{recipientName}</span> failed and could not
+              be completed. Your account balance was not debited.
+            </>
+          ) : isPending ? (
+            <>
+              Your transfer of <span className="font-semibold">{formattedAmount}</span> to{' '}
+              <span className="font-semibold uppercase">{recipientName}</span> is currently pending
+              confirmation from the receiving bank.
+            </>
+          ) : (
+            <>
+              Your transfer of <span className="font-semibold">{formattedAmount}</span> to{' '}
+              <span className="font-semibold uppercase">{recipientName}</span> is currently being
+              processed - absolutely charge-free! Enjoy seamless banking with zero deductions.
+            </>
+          )}
         </p>
 
-        {/* Sage Green Summary Card */}
-        <div className="w-full rounded-[12px] bg-[#D0E3D8] py-6 px-4 flex flex-col items-center text-center">
+        {/* Summary Card */}
+        <div
+          className={`w-full rounded-[12px] py-6 px-4 flex flex-col items-center text-center ${
+            isFailed ? 'bg-[#FEE2E2]' : isPending ? 'bg-[#FEF3C7]' : 'bg-[#D0E3D8]'
+          }`}
+        >
           <div className="text-[22px] font-extrabold text-[#111827] tracking-tight tabular-nums">
             {formattedAmount}
           </div>
-          <div className="text-[13px] font-medium text-[#526058] mt-0.5 mb-5">
-            Amount Transferred
+          <div
+            className={`text-[13px] font-medium mt-0.5 mb-5 ${
+              isFailed ? 'text-[#991B1B]' : isPending ? 'text-[#92400E]' : 'text-[#526058]'
+            }`}
+          >
+            {isFailed
+              ? 'Transfer Failed (Not Debited)'
+              : isPending
+                ? 'Amount Pending Settlement'
+                : 'Amount Transferred'}
           </div>
 
           <div className="text-[14.5px] font-semibold text-[#111827] uppercase tracking-tight">
             {recipientName}
           </div>
-          <div className="text-[13px] font-medium text-[#526058] mt-0.5">
+          <div
+            className={`text-[13px] font-medium mt-0.5 ${
+              isFailed ? 'text-[#991B1B]' : isPending ? 'text-[#92400E]' : 'text-[#526058]'
+            }`}
+          >
             Recipient
           </div>
         </div>
@@ -142,7 +205,13 @@ export const TransferSubmitted: React.FC<TransferSubmittedProps> = ({
         <button
           type="button"
           onClick={onDone}
-          className="w-full py-3.5 rounded-[10px] bg-[#648C6F] hover:bg-[#557A5F] text-white text-[14.5px] font-semibold active:scale-[0.99] transition"
+          className={`w-full py-3.5 rounded-[10px] text-white text-[14.5px] font-semibold active:scale-[0.99] transition ${
+            isFailed
+              ? 'bg-[#D92027] hover:bg-[#B91C1C]'
+              : isPending
+                ? 'bg-[#D97706] hover:bg-[#B45309]'
+                : 'bg-[#648C6F] hover:bg-[#557A5F]'
+          }`}
         >
           Done
         </button>

@@ -5,9 +5,13 @@ import { INITIAL_ACCOUNT, formatNaira } from '../data/bankData';
 interface ProfileScreenProps {
   balance: number;
   profileImage: string | null;
+  transactionFailedMode: boolean;
+  transactionPendingMode: boolean;
   onBack: () => void;
   onAddMoney: (amount: number, sourceLabel: string) => void;
   onUpdateProfileImage: (imageDataUrl: string | null) => void;
+  onToggleTransactionFailedMode: (enabled: boolean) => void;
+  onToggleTransactionPendingMode: (enabled: boolean) => void;
 }
 
 const QUICK_TOPUP_AMOUNTS = [5000, 10000, 25000, 50000, 100000];
@@ -58,9 +62,13 @@ function resizeImageToDataUrl(file: File, maxSize = 360): Promise<string> {
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   balance,
   profileImage,
+  transactionFailedMode,
+  transactionPendingMode,
   onBack,
   onAddMoney,
   onUpdateProfileImage,
+  onToggleTransactionFailedMode,
+  onToggleTransactionPendingMode,
 }) => {
   const [copiedMessage, setCopiedMessage] = useState<string | null>(null);
   const [activeDetailModal, setActiveDetailModal] = useState<
@@ -451,6 +459,124 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
+
+            {/* 6. Transaction Failed Mode Toggle */}
+            <div className="py-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-4">
+                <div
+                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                    transactionFailedMode
+                      ? 'bg-[#FEE2E2] text-[#D92027]'
+                      : 'bg-[#F3F4F6] text-[#6B7280]'
+                  }`}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 8v4.5M12 16h.01" strokeLinecap="round" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-[15px] font-semibold text-[#111827]">
+                    Transaction Failed Mode
+                  </div>
+                  <div
+                    className={`text-[13px] mt-0.5 ${
+                      transactionFailedMode ? 'text-[#D92027] font-medium' : 'text-[#6B7280]'
+                    }`}
+                  >
+                    {transactionFailedMode
+                      ? 'On · Outgoing transfers will fail'
+                      : 'Off · Normal transfer processing'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={transactionFailedMode}
+                aria-label="Toggle Transaction Failed Mode"
+                onClick={() => {
+                  const next = !transactionFailedMode;
+                  onToggleTransactionFailedMode(next);
+                  showToast(
+                    next
+                      ? 'Transaction Failed Mode enabled'
+                      : 'Transaction Failed Mode disabled'
+                  );
+                }}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                  transactionFailedMode
+                    ? 'bg-[#D92027] focus:ring-[#D92027]'
+                    : 'bg-[#D1D5DB] focus:ring-[#4F8D9E]'
+                }`}
+              >
+                <span
+                  className={`block w-5 h-5 rounded-full bg-white shadow-xs transform transition-transform ${
+                    transactionFailedMode ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* 7. Transaction Pending Mode Toggle */}
+            <div className="py-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-4">
+                <div
+                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                    transactionPendingMode
+                      ? 'bg-[#FEF3C7] text-[#D97706]'
+                      : 'bg-[#F3F4F6] text-[#6B7280]'
+                  }`}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7.5V12l3 2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-[15px] font-semibold text-[#111827]">
+                    Transaction Pending Mode
+                  </div>
+                  <div
+                    className={`text-[13px] mt-0.5 ${
+                      transactionPendingMode ? 'text-[#D97706] font-medium' : 'text-[#6B7280]'
+                    }`}
+                  >
+                    {transactionPendingMode
+                      ? 'On · Outgoing transfers stay pending'
+                      : 'Off · Normal transfer processing'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={transactionPendingMode}
+                aria-label="Toggle Transaction Pending Mode"
+                onClick={() => {
+                  const next = !transactionPendingMode;
+                  onToggleTransactionPendingMode(next);
+                  showToast(
+                    next
+                      ? 'Transaction Pending Mode enabled'
+                      : 'Transaction Pending Mode disabled'
+                  );
+                }}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                  transactionPendingMode
+                    ? 'bg-[#F59E0B] focus:ring-[#F59E0B]'
+                    : 'bg-[#D1D5DB] focus:ring-[#4F8D9E]'
+                }`}
+              >
+                <span
+                  className={`block w-5 h-5 rounded-full bg-white shadow-xs transform transition-transform ${
+                    transactionPendingMode ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
 
           {/* Your Personal Information Section */}
