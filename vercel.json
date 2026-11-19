@@ -4,6 +4,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/monnify/(.*)",
+      "destination": "/api/monnify?route=$1"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
