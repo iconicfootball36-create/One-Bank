@@ -6,6 +6,8 @@ import { NotificationsSheet } from './NotificationsSheet';
 
 interface HomeDashboardProps {
   balance: number;
+  hideBalance: boolean;
+  onToggleHideBalance: () => void;
   profileImage?: string | null;
   notifications: AppNotification[];
   showTransferModal: boolean;
@@ -19,6 +21,8 @@ interface HomeDashboardProps {
 
 export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   balance,
+  hideBalance,
+  onToggleHideBalance,
   profileImage,
   notifications,
   showTransferModal,
@@ -30,7 +34,6 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   onNavigate,
 }) => {
   const unreadCount = notifications.filter((n) => !n.read).length;
-  const [hideBalance, setHideBalance] = useState(false);
   const [showAccountsModal, setShowAccountsModal] = useState(false);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
@@ -202,7 +205,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
 
               <button
                 type="button"
-                onClick={() => setHideBalance(!hideBalance)}
+                onClick={onToggleHideBalance}
                 className="w-9 h-9 rounded-full bg-white text-[#1F2937] flex items-center justify-center shadow-xs hover:bg-gray-100 active:scale-95 transition"
                 aria-label="Toggle balance visibility"
               >
@@ -599,7 +602,9 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
             </div>
             <div className="p-4 rounded-xl bg-[#1F2E4D] text-white mb-4">
               <div className="text-xs text-white/75">{INITIAL_ACCOUNT.accountType}</div>
-              <div className="text-lg font-bold mt-0.5">₦{formatNaira(balance)}</div>
+              <div className="text-lg font-bold mt-0.5">
+                {hideBalance ? '₦****' : `₦${formatNaira(balance)}`}
+              </div>
               <div className="text-xs text-white/80 mt-1 tabular-nums">
                 {INITIAL_ACCOUNT.accountNumber} · {INITIAL_ACCOUNT.accountName}
               </div>

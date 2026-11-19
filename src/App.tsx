@@ -35,6 +35,7 @@ const STORAGE_KEYS = {
   notifications: 'onebank_notifications_v1',
   transactionFailedMode: 'onebank_transaction_failed_mode_v1',
   transactionPendingMode: 'onebank_transaction_pending_mode_v1',
+  hideBalance: 'onebank_hide_balance_v1',
 } as const;
 
 const INITIAL_TRANSACTION: TransactionRecord = {
@@ -198,6 +199,14 @@ function loadStoredTransactionPendingMode(): boolean {
   }
 }
 
+function loadStoredHideBalance(): boolean {
+  try {
+    return window.localStorage.getItem(STORAGE_KEYS.hideBalance) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('splash');
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -212,6 +221,7 @@ export default function App() {
   const [transactionPendingMode, setTransactionPendingMode] = useState<boolean>(() =>
     loadStoredTransactionPendingMode()
   );
+  const [hideBalance, setHideBalance] = useState<boolean>(() => loadStoredHideBalance());
   const [amountInput, setAmountInput] = useState<string>('0.0');
   const [confirmationAmount, setConfirmationAmount] = useState<number>(0.40);
   const [submittedAmount, setSubmittedAmount] = useState<number>(10.00);
@@ -313,6 +323,14 @@ export default function App() {
       // Ignore storage quota or private mode errors
     }
   }, [transactionPendingMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEYS.hideBalance, String(hideBalance));
+    } catch {
+      // Ignore storage quota or private mode errors
+    }
+  }, [hideBalance]);
 
   // Load real Nigerian banks directory from Monnify backend on mount
   useEffect(() => {
@@ -747,6 +765,8 @@ export default function App() {
         {currentScreen === 'home' && (
           <HomeDashboard
             balance={balance}
+            hideBalance={hideBalance}
+            onToggleHideBalance={() => setHideBalance((prev) => !prev)}
             profileImage={profileImage}
             notifications={notifications}
             showTransferModal={showTransferModal}
@@ -780,6 +800,8 @@ export default function App() {
         {currentScreen === 'transaction_history' && (
           <TransactionHistory
             balance={balance}
+            hideBalance={hideBalance}
+            onToggleHideBalance={() => setHideBalance((prev) => !prev)}
             transactions={transactions}
             onBack={() => setCurrentScreen('pay_and_transfer')}
             onSelectTransaction={(tx) => {
