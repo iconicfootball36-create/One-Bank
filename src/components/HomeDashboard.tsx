@@ -1,25 +1,35 @@
 import React, { useState } from 'react';
 import { StatusBar, OneBankLogo } from './StatusBar';
-import { AppScreen, INITIAL_ACCOUNT, formatNaira } from '../data/bankData';
+import { AppNotification, AppScreen, INITIAL_ACCOUNT, formatNaira } from '../data/bankData';
 import { PWAInstallButton } from './PWAInstallButton';
+import { NotificationsSheet } from './NotificationsSheet';
 
 interface HomeDashboardProps {
   balance: number;
+  profileImage?: string | null;
+  notifications: AppNotification[];
   showTransferModal: boolean;
   onOpenTransferModal: () => void;
   onCloseTransferModal: () => void;
   onSelectTransferOption: (option: string) => void;
+  onMarkAllNotificationsRead: () => void;
+  onSelectNotification: (notification: AppNotification) => void;
   onNavigate: (screen: AppScreen) => void;
 }
 
 export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   balance,
+  profileImage,
+  notifications,
   showTransferModal,
   onOpenTransferModal,
   onCloseTransferModal,
   onSelectTransferOption,
+  onMarkAllNotificationsRead,
+  onSelectNotification,
   onNavigate,
 }) => {
+  const unreadCount = notifications.filter((n) => !n.read).length;
   const [hideBalance, setHideBalance] = useState(false);
   const [showAccountsModal, setShowAccountsModal] = useState(false);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
@@ -62,7 +72,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
               </svg>
             </button>
 
-            {/* Notification Bell Circle Button with red 20 badge */}
+            {/* Notification Bell Circle Button with live unread count badge */}
             <button
               type="button"
               onClick={() => setShowNotificationsModal(true)}
@@ -73,22 +83,32 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" strokeLinecap="round" strokeLinejoin="round" />
                 <path d="M13.73 21a2 2 0 0 1-3.46 0" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span className="absolute top-1.5 right-1 bg-[#D92027] text-white text-[10px] font-bold px-1.5 py-[1px] rounded-full leading-tight">
-                20
-              </span>
+              {unreadCount > 0 && (
+                <span className="absolute top-1.5 right-1 bg-[#D92027] text-white text-[10px] font-bold px-1.5 py-[1px] rounded-full leading-tight tabular-nums">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
             </button>
 
             {/* Profile Circle Button */}
             <button
               type="button"
               onClick={() => onNavigate('profile')}
-              className="w-11 h-11 rounded-full bg-[#ECEEEF] flex items-center justify-center text-[#1F2937] hover:bg-[#E2E5E8] active:scale-95 transition"
+              className="w-11 h-11 rounded-full bg-[#ECEEEF] overflow-hidden flex items-center justify-center text-[#1F2937] hover:bg-[#E2E5E8] active:scale-95 transition"
               aria-label="Profile"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <circle cx="12" cy="8" r="4" />
-                <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" strokeLinecap="round" />
-              </svg>
+              {profileImage ? (
+                <img
+                  src={profileImage}
+                  alt="Profile"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" strokeLinecap="round" />
+                </svg>
+              )}
             </button>
           </div>
         </div>
@@ -624,38 +644,17 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
         </div>
       )}
 
-      {/* Notifications Sheet */}
-      {showNotificationsModal && (
-        <div className="absolute inset-0 z-30 flex flex-col justify-end bg-black/45">
-          <div className="flex-1" onClick={() => setShowNotificationsModal(false)} />
-          <div className="bg-white rounded-t-[24px] p-6 shadow-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[16px] font-bold text-[#111827]">Notifications (20)</h3>
-              <button
-                type="button"
-                onClick={() => setShowNotificationsModal(false)}
-                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="space-y-3 max-h-60 overflow-y-auto text-xs">
-              <div className="p-3 rounded-xl bg-gray-50">
-                <div className="font-semibold text-[#111827]">Zero-Deduction Transfers Active</div>
-                <div className="text-gray-600 mt-0.5">
-                  Enjoy charge-free interbank transfers on OneBank by Sterling.
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-gray-50">
-                <div className="font-semibold text-[#111827]">Always On Overdraft</div>
-                <div className="text-gray-600 mt-0.5">
-                  Access up to NGN 1,000,000.00 instant overdraft facility today.
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Real Transfer & Account Notifications Sheet */}
+      <NotificationsSheet
+        isOpen={showNotificationsModal}
+        notifications={notifications}
+        onClose={() => setShowNotificationsModal(false)}
+        onMarkAllRead={onMarkAllNotificationsRead}
+        onSelectNotification={(item) => {
+          setShowNotificationsModal(false);
+          onSelectNotification(item);
+        }}
+      />
     </div>
   );
 };

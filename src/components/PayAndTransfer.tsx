@@ -1,21 +1,33 @@
 import React, { useState } from 'react';
 import { StatusBar } from './StatusBar';
-import { AppScreen, Beneficiary, SAVED_BENEFICIARIES } from '../data/bankData';
+import { AppNotification, AppScreen, Beneficiary, SAVED_BENEFICIARIES } from '../data/bankData';
+import { NotificationsSheet } from './NotificationsSheet';
 
 interface PayAndTransferProps {
+  profileImage?: string | null;
+  notifications: AppNotification[];
   onOpenTransferModal: () => void;
   onSelectBeneficiaryAndTransfer: (ben: Beneficiary) => void;
+  onMarkAllNotificationsRead: () => void;
+  onSelectNotification: (notification: AppNotification) => void;
   onNavigate: (screen: AppScreen) => void;
 }
 
 export const PayAndTransfer: React.FC<PayAndTransferProps> = ({
+  profileImage,
+  notifications,
   onOpenTransferModal,
   onSelectBeneficiaryAndTransfer,
+  onMarkAllNotificationsRead,
+  onSelectNotification,
   onNavigate,
 }) => {
   const [showBeneficiariesModal, setShowBeneficiariesModal] = useState(false);
   const [showForeignModal, setShowForeignModal] = useState(false);
   const [showScheduledModal, setShowScheduledModal] = useState(false);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   const quickBeneficiaries = [
     {
@@ -64,10 +76,10 @@ export const PayAndTransfer: React.FC<PayAndTransferProps> = ({
               </svg>
             </button>
 
-            {/* Notification Bell Circle Button with red 21 badge */}
+            {/* Notification Bell Circle Button with live unread badge */}
             <button
               type="button"
-              onClick={() => onNavigate('transaction_history')}
+              onClick={() => setShowNotificationsModal(true)}
               className="relative w-11 h-11 rounded-full bg-[#ECEEEF] flex items-center justify-center text-[#1F2937] hover:bg-[#E2E5E8] active:scale-95 transition"
               aria-label="Notifications"
             >
@@ -75,9 +87,11 @@ export const PayAndTransfer: React.FC<PayAndTransferProps> = ({
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" strokeLinecap="round" strokeLinejoin="round" />
                 <path d="M13.73 21a2 2 0 0 1-3.46 0" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span className="absolute top-1.5 right-1 bg-[#D92027] text-white text-[10px] font-bold px-1.5 py-[1px] rounded-full leading-tight">
-                21
-              </span>
+              {unreadCount > 0 && (
+                <span className="absolute top-1.5 right-1 bg-[#D92027] text-white text-[10px] font-bold px-1.5 py-[1px] rounded-full leading-tight tabular-nums">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
             </button>
 
             {/* Profile Avatar Button */}
@@ -87,11 +101,19 @@ export const PayAndTransfer: React.FC<PayAndTransferProps> = ({
               className="w-11 h-11 rounded-full bg-[#ECEEEF] flex items-center justify-center overflow-hidden hover:opacity-90 active:scale-95 transition"
               aria-label="Profile"
             >
-              <svg width="34" height="34" viewBox="0 0 36 36" fill="none">
-                <circle cx="18" cy="18" r="18" fill="#E5E7EB" />
-                <circle cx="18" cy="13.5" r="6" fill="#BDBFC2" />
-                <path d="M7 32c2.2-5.5 6.2-8 11-8s8.8 2.5 11 8" fill="#BDBFC2" />
-              </svg>
+              {profileImage ? (
+                <img
+                  src={profileImage}
+                  alt="Profile"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <svg width="34" height="34" viewBox="0 0 36 36" fill="none">
+                  <circle cx="18" cy="18" r="18" fill="#E5E7EB" />
+                  <circle cx="18" cy="13.5" r="6" fill="#BDBFC2" />
+                  <path d="M7 32c2.2-5.5 6.2-8 11-8s8.8 2.5 11 8" fill="#BDBFC2" />
+                </svg>
+              )}
             </button>
           </div>
         </div>
@@ -526,6 +548,18 @@ export const PayAndTransfer: React.FC<PayAndTransferProps> = ({
           </div>
         </div>
       )}
+
+      {/* Real Transfer & Account Notifications Sheet */}
+      <NotificationsSheet
+        isOpen={showNotificationsModal}
+        notifications={notifications}
+        onClose={() => setShowNotificationsModal(false)}
+        onMarkAllRead={onMarkAllNotificationsRead}
+        onSelectNotification={(item) => {
+          setShowNotificationsModal(false);
+          onSelectNotification(item);
+        }}
+      />
     </div>
   );
 };

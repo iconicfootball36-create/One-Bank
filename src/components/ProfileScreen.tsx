@@ -1,25 +1,138 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { StatusBar } from './StatusBar';
-import { INITIAL_ACCOUNT } from '../data/bankData';
+import { INITIAL_ACCOUNT, formatNaira } from '../data/bankData';
 
 interface ProfileScreenProps {
+  balance: number;
+  profileImage: string | null;
   onBack: () => void;
+  onAddMoney: (amount: number, sourceLabel: string) => void;
+  onUpdateProfileImage: (imageDataUrl: string | null) => void;
 }
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
+const QUICK_TOPUP_AMOUNTS = [5000, 10000, 25000, 50000, 100000];
+const FUNDING_SOURCES = [
+  'Debit Card Top-Up',
+  'Bank Transfer Inflow',
+  'Cash / Agent Deposit',
+];
+
+function resizeImageToDataUrl(file: File, maxSize = 360): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read selected image.'));
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      if (!result) {
+        reject(new Error('Invalid image file.'));
+        return;
+      }
+
+      const img = new Image();
+      img.onerror = () => resolve(result);
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+          const width = Math.max(1, Math.round(img.width * scale));
+          const height = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(result);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        } catch {
+          resolve(result);
+        }
+      };
+      img.src = result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({
+  balance,
+  profileImage,
+  onBack,
+  onAddMoney,
+  onUpdateProfileImage,
+}) => {
   const [copiedMessage, setCopiedMessage] = useState<string | null>(null);
   const [activeDetailModal, setActiveDetailModal] = useState<
     'bvn' | 'nin' | 'display' | null
   >(null);
+  const [showAddMoneyModal, setShowAddMoneyModal] = useState(false);
+  const [topUpAmountInput, setTopUpAmountInput] = useState('');
+  const [selectedSource, setSelectedSource] = useState(FUNDING_SOURCES[0]);
+  const [topUpError, setTopUpError] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const showToast = (message: string) => {
+    setCopiedMessage(message);
+    setTimeout(() => {
+      setCopiedMessage(null);
+    }, 2400);
+  };
 
   const handleCopy = async (label: string, value: string) => {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(value);
     }
-    setCopiedMessage(`${label} (${value}) copied`);
-    setTimeout(() => {
-      setCopiedMessage(null);
-    }, 2200);
+    showToast(`${label} (${value}) copied`);
+  };
+
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select a valid image file');
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const compressedDataUrl = await resizeImageToDataUrl(file);
+      onUpdateProfileImage(compressedDataUrl);
+      showToast('Profile photo updated');
+    } catch {
+      showToast('Could not upload photo. Please try another image.');
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const parsedTopUpAmount = parseFloat(topUpAmountInput.replace(/,/g, ''));
+  const isTopUpValid =
+    Number.isFinite(parsedTopUpAmount) &&
+    parsedTopUpAmount > 0 &&
+    parsedTopUpAmount <= 100000000;
+
+  const handleSubmitTopUp = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!Number.isFinite(parsedTopUpAmount) || parsedTopUpAmount <= 0) {
+      setTopUpError('Please enter an amount greater than ₦0.00.');
+      return;
+    }
+    if (parsedTopUpAmount > 100000000) {
+      setTopUpError('Maximum single top-up is ₦100,000,000.00.');
+      return;
+    }
+
+    const cleanAmount = Number(parsedTopUpAmount.toFixed(2));
+    onAddMoney(cleanAmount, selectedSource);
+    setShowAddMoneyModal(false);
+    setTopUpAmountInput('');
+    setTopUpError(null);
+    showToast(`₦${formatNaira(cleanAmount)} added to your account`);
   };
 
   return (
@@ -46,22 +159,48 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
 
         {/* Main Scrollable Content */}
         <div className="flex-1 overflow-y-auto no-scrollbar px-4 pb-12">
-          {/* Large Avatar Circle with Bottom Photo Overlay Band */}
-          <div className="flex flex-col items-center mt-1 mb-7">
-            <div className="relative w-[148px] h-[148px] rounded-full bg-gradient-to-b from-[#ECEEEF] to-[#DCDFE3] overflow-hidden flex flex-col items-center justify-center mb-4">
-              {/* Silhouette head & shoulders */}
-              <div className="w-[54px] h-[54px] rounded-full bg-[#B8BCC2] -mt-4" />
-              <div className="w-[96px] h-[44px] rounded-t-full bg-[#B8BCC2] mt-2" />
+          {/* Hidden File Input for Profile Image Upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageFileChange}
+            className="hidden"
+            aria-label="Upload profile photo"
+          />
+
+          {/* Large Avatar Circle with Interactive Photo Upload */}
+          <div className="flex flex-col items-center mt-1 mb-6">
+            <button
+              type="button"
+              disabled={isUploadingImage}
+              onClick={() => fileInputRef.current?.click()}
+              className="relative w-[148px] h-[148px] rounded-full bg-gradient-to-b from-[#ECEEEF] to-[#DCDFE3] overflow-hidden flex flex-col items-center justify-center mb-3.5 group focus:outline-none focus:ring-2 focus:ring-[#4F8D9E] focus:ring-offset-2 active:scale-[0.98] transition"
+              aria-label={profileImage ? 'Change profile photo' : 'Add profile photo'}
+            >
+              {profileImage ? (
+                <img
+                  src={profileImage}
+                  alt="Abdulsalam Tiamiyu"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <>
+                  {/* Silhouette head & shoulders */}
+                  <div className="w-[54px] h-[54px] rounded-full bg-[#B8BCC2] -mt-4" />
+                  <div className="w-[96px] h-[44px] rounded-t-full bg-[#B8BCC2] mt-2" />
+                </>
+              )}
 
               {/* Bottom dark grey overlay strip with gallery picture icon */}
-              <div className="absolute bottom-0 inset-x-0 h-[38px] bg-[#636466] flex items-center justify-center">
+              <div className="absolute bottom-0 inset-x-0 h-[38px] bg-[#636466]/85 group-hover:bg-[#4B4C4E]/95 flex items-center justify-center transition">
                 <svg width="20" height="17" viewBox="0 0 24 20" fill="none" stroke="white" strokeWidth="1.7">
                   <rect x="2" y="2" width="20" height="16" rx="1.5" />
                   <circle cx="16.5" cy="7" r="1.5" fill="white" />
                   <path d="M3 16l5.5-5.5 4.5 4.5 3.5-3 4.5 4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
-            </div>
+            </button>
 
             <h2 className="text-[19px] font-bold text-[#111827] tracking-tight uppercase">
               ABDULSALAM TIAMIYU
@@ -72,6 +211,62 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
               className="text-[14px] font-medium text-[#58595B] mt-1 hover:text-[#111827] transition"
             >
               Ref Code: ABDUT659
+            </button>
+
+            <div className="flex items-center gap-3 mt-2.5">
+              <button
+                type="button"
+                disabled={isUploadingImage}
+                onClick={() => fileInputRef.current?.click()}
+                className="text-[12.5px] font-semibold text-[#4F8D9E] hover:underline disabled:opacity-50"
+              >
+                {isUploadingImage
+                  ? 'Uploading...'
+                  : profileImage
+                    ? 'Change Photo'
+                    : 'Add Profile Photo'}
+              </button>
+              {profileImage && (
+                <>
+                  <span className="text-gray-300">|</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdateProfileImage(null);
+                      showToast('Profile photo removed');
+                    }}
+                    className="text-[12.5px] font-semibold text-[#D92027] hover:underline"
+                  >
+                    Remove Photo
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Account Balance & Add Money Card */}
+          <div className="rounded-[16px] bg-[#1F2E4D] text-white p-4 mb-6 shadow-xs flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[12px] text-white/75 font-medium">
+                Account Balance · {INITIAL_ACCOUNT.accountNumber}
+              </div>
+              <div className="text-[21px] font-bold tracking-tight tabular-nums mt-0.5 truncate">
+                ₦{formatNaira(balance)}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTopUpError(null);
+                setShowAddMoneyModal(true);
+              }}
+              className="shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#4F8D9E] hover:bg-[#417A8A] text-white text-[13px] font-semibold active:scale-95 transition"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+              </svg>
+              <span>Add Money</span>
             </button>
           </div>
 
@@ -337,6 +532,134 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
               Done
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Add Money / Top-Up Modal */}
+      {showAddMoneyModal && (
+        <div className="fixed inset-0 z-30 flex flex-col justify-end bg-black/45">
+          <div
+            className="flex-1"
+            onClick={() => setShowAddMoneyModal(false)}
+          />
+          <form
+            onSubmit={handleSubmitTopUp}
+            className="bg-white rounded-t-[26px] p-6 max-w-2xl w-full mx-auto shadow-2xl"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-[17px] font-bold text-[#111827]">
+                  Add Money to Account
+                </h3>
+                <p className="text-[12px] text-[#6B7280] mt-0.5 tabular-nums">
+                  Sterling Savings · {INITIAL_ACCOUNT.accountNumber}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddMoneyModal(false)}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-[#111827]"
+                aria-label="Close Add Money modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <label
+                htmlFor="profile-add-money-amount"
+                className="block text-[12.5px] font-semibold text-[#374151] mb-1.5"
+              >
+                Amount (NGN)
+              </label>
+              <div className="flex items-center rounded-xl border border-[#D1D5DB] focus-within:border-[#4F8D9E] px-3.5 py-3 bg-[#F9FAFB]">
+                <span className="text-[18px] font-bold text-[#111827] mr-2">₦</span>
+                <input
+                  id="profile-add-money-amount"
+                  type="tel"
+                  inputMode="decimal"
+                  autoFocus
+                  value={topUpAmountInput}
+                  onChange={(e) => {
+                    const sanitized = e.target.value
+                      .replace(/[^0-9.]/g, '')
+                      .replace(/(\..*)\./g, '$1');
+                    setTopUpAmountInput(sanitized);
+                    setTopUpError(null);
+                  }}
+                  placeholder="0.00"
+                  className="w-full bg-transparent text-[20px] font-bold text-[#111827] placeholder-[#9CA3AF] focus:outline-none tabular-nums"
+                />
+              </div>
+            </div>
+
+            {/* Quick Amount Buttons */}
+            <div className="mb-4">
+              <div className="text-[12px] font-semibold text-[#6B7280] mb-2">
+                Quick Select
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {QUICK_TOPUP_AMOUNTS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => {
+                      setTopUpAmountInput(String(preset));
+                      setTopUpError(null);
+                    }}
+                    className={`py-2 px-2.5 rounded-xl border text-[12.5px] font-semibold tabular-nums transition ${
+                      parsedTopUpAmount === preset
+                        ? 'border-[#4F8D9E] bg-[#4F8D9E]/10 text-[#1F2E4D]'
+                        : 'border-[#E5E7EB] bg-white text-[#374151] hover:bg-gray-50'
+                    }`}
+                  >
+                    ₦{preset.toLocaleString('en-NG')}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Funding Source */}
+            <div className="mb-5">
+              <div className="text-[12px] font-semibold text-[#6B7280] mb-2">
+                Funding Source
+              </div>
+              <div className="space-y-2">
+                {FUNDING_SOURCES.map((source) => (
+                  <button
+                    key={source}
+                    type="button"
+                    onClick={() => setSelectedSource(source)}
+                    className={`w-full px-3.5 py-2.5 rounded-xl border text-left text-[13px] font-medium flex items-center justify-between transition ${
+                      selectedSource === source
+                        ? 'border-[#4F8D9E] bg-[#4F8D9E]/10 text-[#111827] font-semibold'
+                        : 'border-[#E5E7EB] bg-white text-[#4B5563] hover:bg-gray-50'
+                    }`}
+                  >
+                    <span>{source}</span>
+                    {selectedSource === source && (
+                      <span className="text-[#4F8D9E] font-bold">✓</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {topUpError && (
+              <div className="mb-3 px-3 py-2 rounded-lg bg-[#FEF2F2] border border-[#FECACA] text-[12px] font-medium text-[#D92027]">
+                {topUpError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full py-3.5 rounded-xl bg-[#1F2E4D] hover:bg-[#16223A] text-white text-[14.5px] font-semibold active:scale-[0.99] transition"
+            >
+              {isTopUpValid
+                ? `Add ₦${formatNaira(parsedTopUpAmount)} to Account`
+                : 'Add Money to Account'}
+            </button>
+          </form>
         </div>
       )}
     </div>

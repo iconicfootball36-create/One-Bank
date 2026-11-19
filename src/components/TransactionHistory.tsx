@@ -30,7 +30,15 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     'All Transactions',
   ];
 
-  const totalMoneyOut = transactions.reduce((sum, tx) => sum + tx.amount, 0);
+  const totalMoneyIn =
+    50000 +
+    transactions
+      .filter((tx) => tx.direction === 'credit')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+
+  const totalMoneyOut = transactions
+    .filter((tx) => tx.direction !== 'credit')
+    .reduce((sum, tx) => sum + tx.amount, 0);
 
   return (
     <div className="relative w-full min-h-screen bg-white flex flex-col justify-between overflow-x-hidden select-none">
@@ -167,7 +175,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
         <div className="grid grid-cols-2 gap-3.5 px-5 mb-7">
           <div className="rounded-[12px] border border-[#E5E7EB] bg-white p-4">
             <div className="text-[15.5px] font-bold text-[#111827] tabular-nums">
-              NGN 50,000.00
+              NGN {formatNaira(totalMoneyIn)}
             </div>
             <div className="text-[13.5px] font-normal text-[#5F8D8B] mt-0.5">
               Money In
@@ -214,43 +222,63 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
 
         {/* Transaction List Items */}
         <div className="px-4 divide-y divide-[#F3F4F6] pb-12">
-          {transactions.map((tx) => (
-            <button
-              key={tx.id}
-              type="button"
-              onClick={() => onSelectTransaction(tx)}
-              className="w-full py-4 flex items-center justify-between text-left hover:bg-gray-50 transition group"
-            >
-              <div className="flex items-center gap-4 pr-3">
-                {/* Red Circular Outgoing Arrow Icon matching screenshot */}
-                <div className="w-11 h-11 rounded-full bg-[#DB545A] flex items-center justify-center shrink-0">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-                    <path d="M13 6l-6 6 6 6v-4h3v-4h-3V6zm5 4h2v4h-2v-4z" />
-                  </svg>
+          {transactions.map((tx) => {
+            const isCredit = tx.direction === 'credit';
+            return (
+              <button
+                key={tx.id}
+                type="button"
+                onClick={() => onSelectTransaction(tx)}
+                className="w-full py-4 flex items-center justify-between text-left hover:bg-gray-50 transition group"
+              >
+                <div className="flex items-center gap-4 pr-3">
+                  {/* Circular Incoming Green or Outgoing Red Arrow Icon */}
+                  <div
+                    className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${
+                      isCredit ? 'bg-[#26B397]' : 'bg-[#DB545A]'
+                    }`}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                      {isCredit ? (
+                        <path d="M11 6l6 6-6 6v-4H8v-4h3V6zm-5 4H4v4h2v-4z" />
+                      ) : (
+                        <path d="M13 6l-6 6 6 6v-4h3v-4h-3V6zm5 4h2v4h-2v-4z" />
+                      )}
+                    </svg>
+                  </div>
+
+                  <div>
+                    <div className="text-[15.5px] font-bold text-[#111827] tabular-nums mb-0.5">
+                      {isCredit ? '+' : ''}NGN{formatNaira(tx.amount)}
+                    </div>
+                    <p className="text-[13.5px] text-[#374151] leading-[1.35]">
+                      {isCredit ? (
+                        <>
+                          Account Top-Up via{' '}
+                          <span className="uppercase">{tx.senderName}</span>
+                        </>
+                      ) : (
+                        <>
+                          OneBank Transfer from ABDULSALAM TIAMIYU to{' '}
+                          <span className="uppercase">{tx.recipientName}</span>
+                        </>
+                      )}
+                    </p>
+                    <div className="text-[13px] text-[#6B7280] mt-1 tabular-nums">
+                      19/11/2026
+                    </div>
+                  </div>
                 </div>
 
-                <div>
-                  <div className="text-[15.5px] font-bold text-[#111827] tabular-nums mb-0.5">
-                    NGN{formatNaira(tx.amount)}
-                  </div>
-                  <p className="text-[13.5px] text-[#374151] leading-[1.35]">
-                    OneBank Transfer from ABDULSALAM TIAMIYU to{' '}
-                    <span className="uppercase">{tx.recipientName}</span>
-                  </p>
-                  <div className="text-[13px] text-[#6B7280] mt-1 tabular-nums">
-                    19/11/2026
-                  </div>
+                {/* Three black dots menu icon */}
+                <div className="flex items-center gap-1 pr-1 shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#111827]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#111827]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#111827]" />
                 </div>
-              </div>
-
-              {/* Three black dots menu icon */}
-              <div className="flex items-center gap-1 pr-1 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#111827]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-[#111827]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-[#111827]" />
-              </div>
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
       </div>
 

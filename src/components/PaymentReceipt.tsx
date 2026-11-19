@@ -106,7 +106,7 @@ export const PaymentReceipt: React.FC<PaymentReceiptProps> = ({
           </div>
         </div>
 
-        {/* Amber Status Banner: Transfer Request initiated */}
+        {/* Amber Status Banner: Transfer Request initiated / Account Credited */}
         <div className="mx-auto w-[84%] rounded-full bg-[#F7E3AF] py-2 px-4 flex items-center justify-center gap-2 mb-3">
           <span className="w-4 h-4 rounded-full bg-[#F59E0B] text-white flex items-center justify-center shrink-0">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
@@ -114,7 +114,9 @@ export const PaymentReceipt: React.FC<PaymentReceiptProps> = ({
             </svg>
           </span>
           <span className="text-[12.5px] font-bold text-[#111827]">
-            Transfer Request initiated
+            {transaction.direction === 'credit'
+              ? 'Account Top-Up Successful'
+              : 'Transfer Request initiated'}
           </span>
         </div>
 

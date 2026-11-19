@@ -51,6 +51,17 @@ export interface TransactionRecord {
   dateFormatted: string;
   timeFormatted: string;
   status?: TransactionStatus;
+  direction?: 'debit' | 'credit';
+}
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  type: 'debit' | 'credit' | 'info';
+  read: boolean;
+  transactionId?: string;
 }
 
 export const INITIAL_ACCOUNT = {

@@ -5,6 +5,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  AppNotification,
   AppScreen,
   BankOption,
   Beneficiary,
@@ -30,6 +31,8 @@ const STORAGE_KEYS = {
   balance: 'onebank_account_balance_v1',
   transactions: 'onebank_transactions_v1',
   latestTransaction: 'onebank_latest_transaction_v1',
+  profileImage: 'onebank_profile_image_v1',
+  notifications: 'onebank_notifications_v1',
 } as const;
 
 const INITIAL_TRANSACTION: TransactionRecord = {
@@ -98,6 +101,61 @@ function loadStoredLatestTransaction(fallbackTx: TransactionRecord): Transaction
   return fallbackTx;
 }
 
+function buildNotificationFromTransaction(
+  tx: TransactionRecord,
+  read = false
+): AppNotification {
+  const formattedAmt = `₦${formatNaira(tx.amount)}`;
+  if (tx.direction === 'credit') {
+    return {
+      id: `notif-${tx.id}`,
+      title: `Account Credited · ${formattedAmt}`,
+      message: `${formattedAmt} was added to your account via ${tx.senderName}. Ref: ${tx.reference}`,
+      timestamp: `${tx.dateFormatted} · ${tx.timeFormatted}`,
+      type: 'credit',
+      read,
+      transactionId: tx.id,
+    };
+  }
+
+  return {
+    id: `notif-${tx.id}`,
+    title: `Transfer Sent · ${formattedAmt}`,
+    message: `Sent ${formattedAmt} to ${tx.recipientName} (${tx.recipientBank} · ${tx.recipientAccount}). Ref: ${tx.reference}`,
+    timestamp: `${tx.dateFormatted} · ${tx.timeFormatted}`,
+    type: 'debit',
+    read,
+    transactionId: tx.id,
+  };
+}
+
+function loadStoredNotifications(fallbackTransactions: TransactionRecord[]): AppNotification[] {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.notifications);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (item): item is AppNotification =>
+            Boolean(item && typeof item.id === 'string' && typeof item.title === 'string')
+        );
+      }
+    }
+  } catch {
+    // Ignore storage or JSON errors
+  }
+  return fallbackTransactions.map((tx) => buildNotificationFromTransaction(tx, true));
+}
+
+function loadStoredProfileImage(): string | null {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.profileImage);
+    return raw && raw.startsWith('data:image/') ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('splash');
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -105,6 +163,7 @@ export default function App() {
 
   // Account & Form State (persisted across page refreshes)
   const [balance, setBalance] = useState<number>(() => loadStoredBalance());
+  const [profileImage, setProfileImage] = useState<string | null>(() => loadStoredProfileImage());
   const [amountInput, setAmountInput] = useState<string>('0.0');
   const [confirmationAmount, setConfirmationAmount] = useState<number>(0.40);
   const [submittedAmount, setSubmittedAmount] = useState<number>(10.00);
@@ -134,6 +193,9 @@ export default function App() {
     const stored = loadStoredTransactions();
     return loadStoredLatestTransaction(stored[0] || INITIAL_TRANSACTION);
   });
+  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
+    loadStoredNotifications(loadStoredTransactions())
+  );
 
   useEffect(() => {
     try {
@@ -161,6 +223,26 @@ export default function App() {
       // Ignore storage quota or private mode errors
     }
   }, [latestTransaction]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(notifications));
+    } catch {
+      // Ignore storage quota or private mode errors
+    }
+  }, [notifications]);
+
+  useEffect(() => {
+    try {
+      if (profileImage) {
+        window.localStorage.setItem(STORAGE_KEYS.profileImage, profileImage);
+      } else {
+        window.localStorage.removeItem(STORAGE_KEYS.profileImage);
+      }
+    } catch {
+      // Ignore storage quota or private mode errors
+    }
+  }, [profileImage]);
 
   // Load real Nigerian banks directory from Monnify backend on mount
   useEffect(() => {
@@ -394,6 +476,7 @@ export default function App() {
 
       setLatestTransaction(newTx);
       setTransactions((prev) => [newTx, ...prev]);
+      setNotifications((prev) => [buildNotificationFromTransaction(newTx, false), ...prev]);
 
       // Only deduct user balance when Monnify confirms SUCCESS or COMPLETED/PENDING settlement
       if (txStatus === 'SUCCESS' || txStatus === 'PENDING') {
@@ -493,6 +576,68 @@ export default function App() {
     }
   };
 
+  const handleAddMoneyToAccount = useCallback((amount: number, sourceLabel: string) => {
+    const now = new Date();
+    const dateFormatted = now.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    const timeFormatted = now
+      .toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      })
+      .replace(':', '.')
+      .replace(/\s+/g, '');
+
+    const creditTx: TransactionRecord = {
+      id: `tx-topup-${Date.now()}`,
+      amount,
+      charges: 0.0,
+      stampDuty: 0.0,
+      total: amount,
+      senderName: sourceLabel.toUpperCase(),
+      sourceAccount: sourceLabel,
+      recipientName: INITIAL_ACCOUNT.accountName.toUpperCase(),
+      recipientAccount: INITIAL_ACCOUNT.accountNumber,
+      recipientBank: 'STERLING BANK PLC',
+      reference: `OB-TOPUP-${Date.now()}`,
+      narration: `${sourceLabel} to ${INITIAL_ACCOUNT.accountNumber}`,
+      category: 'General',
+      dateFormatted,
+      timeFormatted,
+      status: 'SUCCESS',
+      direction: 'credit',
+    };
+
+    setBalance((prev) => Number((prev + amount).toFixed(2)));
+    setTransactions((prev) => [creditTx, ...prev]);
+    setLatestTransaction(creditTx);
+    setNotifications((prev) => [buildNotificationFromTransaction(creditTx, false), ...prev]);
+  }, []);
+
+  const handleMarkAllNotificationsRead = useCallback(() => {
+    setNotifications((prev) => prev.map((n) => (n.read ? n : { ...n, read: true })));
+  }, []);
+
+  const handleSelectNotification = useCallback(
+    (item: AppNotification) => {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === item.id ? { ...n, read: true } : n))
+      );
+      if (item.transactionId) {
+        const matchedTx = transactions.find((tx) => tx.id === item.transactionId);
+        if (matchedTx) {
+          setLatestTransaction(matchedTx);
+          setCurrentScreen('payment_receipt');
+        }
+      }
+    },
+    [transactions]
+  );
+
   return (
     <div className="min-h-screen w-full bg-white text-[#111827] flex flex-col">
       <OfflineIndicator />
@@ -504,16 +649,22 @@ export default function App() {
         {currentScreen === 'home' && (
           <HomeDashboard
             balance={balance}
+            profileImage={profileImage}
+            notifications={notifications}
             showTransferModal={showTransferModal}
             onOpenTransferModal={() => setShowTransferModal(true)}
             onCloseTransferModal={() => setShowTransferModal(false)}
             onSelectTransferOption={handleSelectTransferOption}
+            onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+            onSelectNotification={handleSelectNotification}
             onNavigate={(scr) => setCurrentScreen(scr)}
           />
         )}
 
         {currentScreen === 'pay_and_transfer' && (
           <PayAndTransfer
+            profileImage={profileImage}
+            notifications={notifications}
             onOpenTransferModal={() => {
               setCurrentScreen('home');
               setShowTransferModal(true);
@@ -522,6 +673,8 @@ export default function App() {
               handleSelectBeneficiary(ben);
               setCurrentScreen('transfer_other_banks');
             }}
+            onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+            onSelectNotification={handleSelectNotification}
             onNavigate={(scr) => setCurrentScreen(scr)}
           />
         )}
@@ -539,7 +692,13 @@ export default function App() {
         )}
 
         {currentScreen === 'profile' && (
-          <ProfileScreen onBack={() => setCurrentScreen('home')} />
+          <ProfileScreen
+            balance={balance}
+            profileImage={profileImage}
+            onBack={() => setCurrentScreen('home')}
+            onAddMoney={handleAddMoneyToAccount}
+            onUpdateProfileImage={setProfileImage}
+          />
         )}
 
         {currentScreen === 'transfer_other_banks' && (
@@ -632,6 +791,20 @@ export default function App() {
             onQuickBuySuccess={(amt, label) => {
               if (amt > balance) return;
               setSubmittedAmount(amt);
+              const now = new Date();
+              const dateFormatted = now.toLocaleDateString('en-US', {
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
+              });
+              const timeFormatted = now
+                .toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: true,
+                })
+                .replace(':', '.')
+                .replace(/\s+/g, '');
               const tx: TransactionRecord = {
                 id: `tx-${Date.now()}`,
                 amount: amt,
@@ -646,12 +819,13 @@ export default function App() {
                 reference: `OB-BILL-${Date.now()}`,
                 narration: label,
                 category: 'Bills & Utilities',
-                dateFormatted: 'November 19, 2026',
-                timeFormatted: '12.19AM',
+                dateFormatted,
+                timeFormatted,
                 status: 'SUCCESS',
               };
               setLatestTransaction(tx);
               setTransactions((prev) => [tx, ...prev]);
+              setNotifications((prev) => [buildNotificationFromTransaction(tx, false), ...prev]);
               setBalance((prev) => Math.max(0, Number((prev - amt).toFixed(2))));
               setCurrentScreen('transfer_submitted_confetti');
             }}
