@@ -1,5 +1,6 @@
 import React from 'react';
 import { StatusBar } from './StatusBar';
+import { formatNaira } from '../data/bankData';
 
 interface TransferSubmittedProps {
   amount: number;
@@ -16,7 +17,7 @@ export const TransferSubmitted: React.FC<TransferSubmittedProps> = ({
   onViewReceipt,
   onDone,
 }) => {
-  const formattedAmount = `₦${amount.toFixed(2)}`;
+  const formattedAmount = `₦${formatNaira(amount)}`;
 
   return (
     <div className="relative w-full min-h-screen bg-white flex flex-col justify-between overflow-x-hidden select-none">

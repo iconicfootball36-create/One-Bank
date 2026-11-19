@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StatusBar, OneBankLogo } from './StatusBar';
-import { TransactionRecord } from '../data/bankData';
+import { TransactionRecord, formatNaira } from '../data/bankData';
 
 interface PaymentReceiptProps {
   transaction: TransactionRecord;
@@ -15,7 +15,7 @@ export const PaymentReceipt: React.FC<PaymentReceiptProps> = ({
 }) => {
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
 
-  const formattedAmount = `₦${transaction.amount.toFixed(2)}`;
+  const formattedAmount = `₦${formatNaira(transaction.amount)}`;
 
   const triggerActionFeedback = (message: string) => {
     setFeedbackToast(message);

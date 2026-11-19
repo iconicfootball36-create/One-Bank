@@ -231,7 +231,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({
 
                 <div>
                   <div className="text-[15.5px] font-bold text-[#111827] tabular-nums mb-0.5">
-                    NGN{tx.amount.toFixed(2)}
+                    NGN{formatNaira(tx.amount)}
                   </div>
                   <p className="text-[13.5px] text-[#374151] leading-[1.35]">
                     OneBank Transfer from ABDULSALAM TIAMIYU to{' '}

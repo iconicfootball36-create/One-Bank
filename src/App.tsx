@@ -26,13 +26,85 @@ import { PaymentReceipt } from './components/PaymentReceipt';
 import { SecondaryScreens } from './components/SecondaryScreens';
 import { OfflineIndicator } from './components/PWAInstallButton';
 
+const STORAGE_KEYS = {
+  balance: 'onebank_account_balance_v1',
+  transactions: 'onebank_transactions_v1',
+  latestTransaction: 'onebank_latest_transaction_v1',
+} as const;
+
+const INITIAL_TRANSACTION: TransactionRecord = {
+  id: 'tx-initial',
+  amount: 10.00,
+  charges: 0.00,
+  stampDuty: 0.00,
+  total: 10.00,
+  senderName: INITIAL_ACCOUNT.senderReceiptName,
+  sourceAccount: INITIAL_ACCOUNT.sourceDisplay,
+  recipientName: 'ABDULSALAM ADEDAYO TIAMIYU',
+  recipientAccount: '9042769211',
+  recipientBank: 'PALMPAY LIMITED',
+  reference: '000001261119001847662176533576',
+  narration: '',
+  category: 'General',
+  dateFormatted: 'November 19, 2026',
+  timeFormatted: '12.19AM',
+  status: 'SUCCESS',
+};
+
+function loadStoredBalance(): number {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.balance);
+    if (raw === null) return INITIAL_ACCOUNT.balance;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Number(parsed.toFixed(2));
+    }
+  } catch {
+    // Ignore localStorage access errors
+  }
+  return INITIAL_ACCOUNT.balance;
+}
+
+function loadStoredTransactions(): TransactionRecord[] {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.transactions);
+    if (!raw) return [INITIAL_TRANSACTION];
+    const parsed = JSON.parse(raw);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      typeof parsed[0]?.id === 'string' &&
+      typeof parsed[0]?.amount === 'number'
+    ) {
+      return parsed as TransactionRecord[];
+    }
+  } catch {
+    // Ignore malformed JSON or storage errors
+  }
+  return [INITIAL_TRANSACTION];
+}
+
+function loadStoredLatestTransaction(fallbackTx: TransactionRecord): TransactionRecord {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.latestTransaction);
+    if (!raw) return fallbackTx;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.id === 'string' && typeof parsed.amount === 'number') {
+      return parsed as TransactionRecord;
+    }
+  } catch {
+    // Ignore malformed JSON or storage errors
+  }
+  return fallbackTx;
+}
+
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('splash');
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showBankModal, setShowBankModal] = useState(false);
 
-  // Account & Form State
-  const [balance, setBalance] = useState<number>(INITIAL_ACCOUNT.balance);
+  // Account & Form State (persisted across page refreshes)
+  const [balance, setBalance] = useState<number>(() => loadStoredBalance());
   const [amountInput, setAmountInput] = useState<string>('0.0');
   const [confirmationAmount, setConfirmationAmount] = useState<number>(0.40);
   const [submittedAmount, setSubmittedAmount] = useState<number>(10.00);
@@ -54,27 +126,41 @@ export default function App() {
   const [category, setCategory] = useState<string>('General');
   const [addToBeneficiaries, setAddToBeneficiaries] = useState<boolean>(false);
 
-  // Official receipt state
-  const [latestTransaction, setLatestTransaction] = useState<TransactionRecord>({
-    id: 'tx-initial',
-    amount: 10.00,
-    charges: 0.00,
-    stampDuty: 0.00,
-    total: 10.00,
-    senderName: INITIAL_ACCOUNT.senderReceiptName,
-    sourceAccount: INITIAL_ACCOUNT.sourceDisplay,
-    recipientName: 'ABDULSALAM ADEDAYO TIAMIYU',
-    recipientAccount: '9042769211',
-    recipientBank: 'PALMPAY LIMITED',
-    reference: '000001261119001847662176533576',
-    narration: '',
-    category: 'General',
-    dateFormatted: 'November 19, 2026',
-    timeFormatted: '12.19AM',
-    status: 'SUCCESS',
+  // Official receipt & history state (persisted across page refreshes)
+  const [transactions, setTransactions] = useState<TransactionRecord[]>(() =>
+    loadStoredTransactions()
+  );
+  const [latestTransaction, setLatestTransaction] = useState<TransactionRecord>(() => {
+    const stored = loadStoredTransactions();
+    return loadStoredLatestTransaction(stored[0] || INITIAL_TRANSACTION);
   });
 
-  const [transactions, setTransactions] = useState<TransactionRecord[]>([latestTransaction]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEYS.balance, balance.toFixed(2));
+    } catch {
+      // Ignore storage quota or private mode errors
+    }
+  }, [balance]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEYS.transactions, JSON.stringify(transactions));
+    } catch {
+      // Ignore storage quota or private mode errors
+    }
+  }, [transactions]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEYS.latestTransaction,
+        JSON.stringify(latestTransaction)
+      );
+    } catch {
+      // Ignore storage quota or private mode errors
+    }
+  }, [latestTransaction]);
 
   // Load real Nigerian banks directory from Monnify backend on mount
   useEffect(() => {
@@ -340,6 +426,7 @@ export default function App() {
 
     setIsProcessingTransfer(true);
     setTransferError(null);
+    const loadingStartedAt = Date.now();
 
     try {
       const res = await fetch('/api/monnify/transfer', {
@@ -377,6 +464,13 @@ export default function App() {
           data.error || 'Transfer could not be completed by Monnify. Your balance has not been debited.'
         );
         return;
+      }
+
+      // Ensure the full-screen loader stays visible for 1.5s (1-2s) after PIN/biometric entry
+      const elapsed = Date.now() - loadingStartedAt;
+      const minLoaderDurationMs = 1500;
+      if (elapsed < minLoaderDurationMs) {
+        await new Promise((resolve) => setTimeout(resolve, minLoaderDurationMs - elapsed));
       }
 
       const txReference = data.reference || `OB-${Date.now()}`;
@@ -564,6 +658,37 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Full-screen white transfer processing loader (1-2s) */}
+      {isProcessingTransfer && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label="Processing transfer"
+          className="fixed inset-0 z-50 bg-white flex items-center justify-center"
+        >
+          <svg
+            className="w-12 h-12 animate-spin motion-reduce:animate-none"
+            viewBox="0 0 48 48"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle
+              cx="24"
+              cy="24"
+              r="18"
+              stroke="#9E6E71"
+              strokeWidth="5.5"
+            />
+            <path
+              d="M24 6 A18 18 0 0 1 42 24"
+              stroke="#D92027"
+              strokeWidth="5.5"
+              strokeLinecap="butt"
+            />
+          </svg>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { StatusBar } from './StatusBar';
 import { BankOption, INITIAL_ACCOUNT, NIGERIAN_BANKS, formatNaira } from '../data/bankData';
+import { BiometricAuthOverlay, BiometricMethod } from './BiometricAuthOverlay';
 
 interface TransactionConfirmationProps {
   amount: number;
@@ -26,26 +27,40 @@ export const TransactionConfirmation: React.FC<TransactionConfirmationProps> = (
   onSubmitPin,
 }) => {
   const [pin, setPin] = useState('');
-  const [showKeypad, setShowKeypad] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
   const [showAllBankRatesModal, setShowAllBankRatesModal] = useState(false);
+  const [showBiometricOverlay, setShowBiometricOverlay] = useState(true);
+  const [biometricStatus, setBiometricStatus] = useState<'pending' | 'verified' | 'skipped'>('pending');
+  const [verifiedMethod, setVerifiedMethod] = useState<BiometricMethod | null>(null);
+  const pinInputRef = useRef<HTMLInputElement>(null);
 
   const formattedAmount = `₦${formatNaira(amount)}`;
 
-  const handleDigitPress = (digit: string) => {
+  const handlePinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isProcessingTransfer) return;
-    if (pin.length < 4) {
-      const next = pin + digit;
-      setPin(next);
-      if (next.length === 4) {
-        setTimeout(() => {
-          onSubmitPin(next);
-        }, 180);
-      }
+    if (biometricStatus === 'pending') {
+      setShowBiometricOverlay(true);
+      return;
+    }
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 4);
+    setPin(digits);
+    setPinError(null);
+    if (digits.length === 4) {
+      pinInputRef.current?.blur();
+      setTimeout(() => {
+        onSubmitPin(digits);
+      }, 180);
     }
   };
 
-  const handleBackspace = () => {
-    setPin((prev) => prev.slice(0, -1));
+  const focusPhonePinInput = () => {
+    if (biometricStatus === 'pending') {
+      setShowBiometricOverlay(true);
+      return;
+    }
+    setTimeout(() => {
+      pinInputRef.current?.focus();
+    }, 50);
   };
 
   return (
@@ -177,95 +192,126 @@ export const TransactionConfirmation: React.FC<TransactionConfirmationProps> = (
             </button>
           </div>
 
-          {/* Large Navy 0000 PIN Display & Trigger */}
+          {/* Native Phone Keyboard PIN Input & Trigger */}
           <div className="flex flex-col items-center justify-center pt-2 pb-4">
-            <button
-              type="button"
-              disabled={isProcessingTransfer}
-              onClick={() => onSubmitPin(pin || '0000')}
-              className="group flex flex-col items-center focus:outline-none cursor-pointer active:scale-95 transition"
-            >
-              <div className="text-[38px] font-bold tracking-[0.06em] text-[#1D3557] leading-none mb-2 tabular-nums">
-                {pin.length === 0 ? '0000' : pin.padEnd(4, '0')}
-              </div>
-              <span className="text-[13.5px] font-normal text-[#374151] group-hover:text-[#D92027] transition">
+            {biometricStatus === 'verified' && verifiedMethod && (
+              <p className="text-[12px] font-medium text-[#26B397] mb-2">
+                {verifiedMethod === 'faceid' ? 'Face ID verified' : 'Fingerprint verified'} · Transfer authorized
+              </p>
+            )}
+
+            <div className="flex flex-col items-center">
+              <input
+                ref={pinInputRef}
+                id="transaction-pin-input"
+                type="tel"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={4}
+                autoComplete="off"
+                disabled={isProcessingTransfer}
+                readOnly={biometricStatus === 'pending'}
+                value={pin}
+                placeholder="0000"
+                aria-label="4-digit Transaction PIN"
+                onClick={() => {
+                  if (biometricStatus === 'pending') {
+                    setShowBiometricOverlay(true);
+                  }
+                }}
+                onChange={handlePinChange}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (biometricStatus === 'verified' || pin.length === 4) {
+                      onSubmitPin(pin || '0000');
+                    } else {
+                      setPinError('Please enter all 4 digits of your Transaction PIN.');
+                    }
+                  }
+                }}
+                className="w-44 text-center text-[38px] font-bold tracking-[0.14em] text-[#1D3557] placeholder-[#1D3557]/35 leading-none pb-1.5 mb-2 bg-transparent border-b-2 border-[#E5E7EB] focus:border-[#1D3557] focus:outline-none tabular-nums select-text transition-colors"
+              />
+              <label
+                htmlFor="transaction-pin-input"
+                onClick={() => {
+                  if (biometricStatus === 'pending') {
+                    setShowBiometricOverlay(true);
+                  }
+                }}
+                className="text-[13.5px] font-normal text-[#374151] cursor-pointer"
+              >
                 {isProcessingTransfer
                   ? 'Processing transfer...'
-                  : 'Enter Your Transaction PIN'}
-              </span>
-            </button>
+                  : biometricStatus === 'pending'
+                    ? 'Verify Biometrics to Authorize'
+                    : biometricStatus === 'verified'
+                      ? 'Tap Authorize Transfer below or enter PIN'
+                      : 'Tap above to enter PIN with keyboard'}
+              </label>
+            </div>
 
-            {transferError && (
+            {(pinError || transferError) && (
               <div className="mt-3 px-3.5 py-2.5 rounded-lg bg-[#FEF2F2] border border-[#FECACA] text-[12.5px] font-medium text-[#D92027] text-center max-w-sm">
-                {transferError}
+                {pinError || transferError}
               </div>
             )}
 
-            {/* Keypad & Authorize buttons */}
-            <div className="mt-4 flex items-center gap-3">
+            {/* Biometric & Authorize buttons */}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+              {biometricStatus !== 'verified' && (
+                <button
+                  type="button"
+                  disabled={isProcessingTransfer}
+                  onClick={() => setShowBiometricOverlay(true)}
+                  className="px-4 py-2 rounded-full bg-[#F2F4F7] hover:bg-[#E5E7EB] disabled:opacity-50 text-[12.5px] font-semibold text-[#1D3557] transition whitespace-nowrap"
+                >
+                  Verify Biometrics
+                </button>
+              )}
               <button
                 type="button"
                 disabled={isProcessingTransfer}
-                onClick={() => setShowKeypad(!showKeypad)}
-                className="px-3.5 py-1.5 rounded-full bg-[#F2F4F7] hover:bg-[#E5E7EB] disabled:opacity-50 text-[12px] font-semibold text-[#1D3557] transition"
-              >
-                {showKeypad ? 'Hide Keypad' : 'Open PIN Keypad'}
-              </button>
-              <button
-                type="button"
-                disabled={isProcessingTransfer}
-                onClick={() => onSubmitPin(pin || '0000')}
-                className="px-4 py-1.5 rounded-full bg-[#1D3557] hover:bg-[#152741] disabled:opacity-50 text-[12px] font-semibold text-white transition"
+                onClick={() => {
+                  if (biometricStatus === 'pending') {
+                    setShowBiometricOverlay(true);
+                    return;
+                  }
+                  if (biometricStatus !== 'verified' && pin.length < 4) {
+                    setPinError('Please enter your 4-digit Transaction PIN.');
+                    focusPhonePinInput();
+                    return;
+                  }
+                  onSubmitPin(pin || '0000');
+                }}
+                className="px-5 py-2 rounded-full bg-[#1D3557] hover:bg-[#152741] disabled:opacity-50 text-[12.5px] font-semibold text-white transition whitespace-nowrap"
               >
                 {isProcessingTransfer ? 'Sending...' : 'Authorize Transfer'}
               </button>
             </div>
           </div>
-
-          {/* Optional Interactive Numeric Keypad Drawer */}
-          {showKeypad && (
-            <div className="mt-2 bg-[#F9FAFB] rounded-2xl p-3 border border-[#E5E7EB]">
-              <div className="grid grid-cols-3 gap-2">
-                {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
-                  <button
-                    key={digit}
-                    type="button"
-                    disabled={isProcessingTransfer}
-                    onClick={() => handleDigitPress(digit)}
-                    className="h-11 rounded-xl bg-white border border-gray-200 text-[17px] font-bold text-[#111827] hover:bg-gray-50 active:scale-95 transition tabular-nums disabled:opacity-50"
-                  >
-                    {digit}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  disabled={isProcessingTransfer}
-                  onClick={() => setPin('')}
-                  className="h-11 rounded-xl bg-white border border-gray-200 text-[12px] font-semibold text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  Clear
-                </button>
-                <button
-                  type="button"
-                  disabled={isProcessingTransfer}
-                  onClick={() => handleDigitPress('0')}
-                  className="h-11 rounded-xl bg-white border border-gray-200 text-[17px] font-bold text-[#111827] hover:bg-gray-50 active:scale-95 transition tabular-nums disabled:opacity-50"
-                >
-                  0
-                </button>
-                <button
-                  type="button"
-                  disabled={isProcessingTransfer}
-                  onClick={handleBackspace}
-                  className="h-11 rounded-xl bg-white border border-gray-200 text-[14px] font-semibold text-[#111827] hover:bg-gray-50 disabled:opacity-50"
-                >
-                  ⌫
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
+
+      {/* Simulated Biometric Authentication Overlay (Face ID / Fingerprint) */}
+      <BiometricAuthOverlay
+        isOpen={showBiometricOverlay}
+        amount={amount}
+        recipientName={recipientName}
+        onSuccess={(method) => {
+          setVerifiedMethod(method);
+          setBiometricStatus('verified');
+          setShowBiometricOverlay(false);
+          onSubmitPin(pin || '0000');
+        }}
+        onFallbackToPin={() => {
+          setBiometricStatus('skipped');
+          setShowBiometricOverlay(false);
+          setTimeout(() => pinInputRef.current?.focus(), 80);
+        }}
+        onCancel={() => {
+          setShowBiometricOverlay(false);
+        }}
+      />
 
       {/* All Banks Transfer Success Rates Modal */}
       {showAllBankRatesModal && (
