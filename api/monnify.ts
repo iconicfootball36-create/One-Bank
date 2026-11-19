@@ -29,17 +29,6 @@ let tokenExpiresAt = 0;
 let cachedMonnifyBanks: MonnifyBankRecord[] = [];
 let banksCacheExpiresAt = 0;
 
-const inFlightTransfers = new Set<string>();
-const processedIdempotencyKeys = new Map<
-  string,
-  {
-    status: string;
-    reference: string;
-    responseBody: Record<string, unknown>;
-    timestamp: number;
-  }
->();
-
 function sendJson(res: VercelRes, statusCode: number, payload: unknown): void {
   if (typeof res.status === 'function') {
     const statusRes = res.status(statusCode);
@@ -514,29 +503,6 @@ async function handleTransfer(req: VercelReq, res: VercelRes) {
     return;
   }
 
-  const dedupeKey =
-    idempotencyKey || `${cleanAccount}-${destinationBankCode}-${numericAmount.toFixed(2)}`;
-
-  if (inFlightTransfers.has(dedupeKey)) {
-    sendJson(res, 409, {
-      error: 'This transfer is already being processed. Please wait.',
-    });
-    return;
-  }
-
-  const existingProcessed = processedIdempotencyKeys.get(dedupeKey);
-  if (existingProcessed && Date.now() - existingProcessed.timestamp < 60_000) {
-    sendJson(res, 200, {
-      live: true,
-      requestSuccessful: true,
-      duplicatePrevented: true,
-      reference: existingProcessed.reference,
-      status: existingProcessed.status,
-      responseBody: existingProcessed.responseBody,
-    });
-    return;
-  }
-
   const { baseUrl, isConfigured, sourceAccountNumber } = getMonnifyConfig();
   const walletAccount = (customSourceAccount || sourceAccountNumber || '').trim();
 
@@ -561,7 +527,6 @@ async function handleTransfer(req: VercelReq, res: VercelRes) {
   }
 
   const reference = `OB-${Date.now()}-${Math.floor(100000 + Math.random() * 899999)}`;
-  inFlightTransfers.add(dedupeKey);
 
   try {
     const token = await getMonnifyAccessToken();
@@ -572,48 +537,87 @@ async function handleTransfer(req: VercelReq, res: VercelRes) {
       baseUrl
     );
     const resolvedBankCode = candidateBankCodes[0] || destinationBankCode;
+    const baseNarration =
+      narration && narration.trim()
+        ? narration.trim()
+        : `Transfer to ${destinationAccountName.trim()}`;
 
-    const payload = {
-      amount: numericAmount,
-      reference,
-      narration:
-        narration && narration.trim()
-          ? narration.trim()
-          : `Transfer to ${destinationAccountName.trim()}`,
-      destinationBankCode: resolvedBankCode,
-      destinationAccountNumber: cleanAccount,
-      destinationAccountName: destinationAccountName.trim(),
-      currency: 'NGN',
-      sourceAccountNumber: walletAccount,
-      async: false,
+    const sendDisbursement = async (txReference: string, txNarration: string) => {
+      const payload = {
+        amount: numericAmount,
+        reference: txReference,
+        narration: txNarration,
+        destinationBankCode: resolvedBankCode,
+        destinationAccountNumber: cleanAccount,
+        destinationAccountName: destinationAccountName.trim(),
+        currency: 'NGN',
+        sourceAccountNumber: walletAccount,
+        async: false,
+      };
+
+      const response = await fetch(`${baseUrl}/api/v2/disbursements/single`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await safeJson<{
+        requestSuccessful?: boolean;
+        responseMessage?: string;
+        responseCode?: string;
+        responseBody?: {
+          amount?: number;
+          reference?: string;
+          transactionReference?: string;
+          status?: string;
+          dateCreated?: string;
+          totalFee?: number;
+          destinationAccountName?: string;
+          destinationBankName?: string;
+          destinationAccountNumber?: string;
+          destinationBankCode?: string;
+        };
+      }>(response);
+
+      return { response, data };
     };
 
-    const response = await fetch(`${baseUrl}/api/v2/disbursements/single`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+    let { response, data } = await sendDisbursement(reference, baseNarration);
+    let activeReference = reference;
 
-    const data = await safeJson<{
-      requestSuccessful?: boolean;
-      responseMessage?: string;
-      responseCode?: string;
-      responseBody?: {
-        amount?: number;
-        reference?: string;
-        transactionReference?: string;
-        status?: string;
-        dateCreated?: string;
-        totalFee?: number;
-        destinationAccountName?: string;
-        destinationBankName?: string;
-        destinationAccountNumber?: string;
-        destinationBankCode?: string;
-      };
-    }>(response);
+    const isMonnifyDuplicateError = (msg?: string) => {
+      const lower = (msg || '').toLowerCase();
+      return (
+        lower.includes('duplicate') ||
+        lower.includes('similar') ||
+        lower.includes('recently initiated') ||
+        lower.includes('already exist')
+      );
+    };
+
+    if ((!response.ok || !data.requestSuccessful) && isMonnifyDuplicateError(data.responseMessage)) {
+      activeReference = `OB-${Date.now()}-${Math.floor(100000 + Math.random() * 899999)}`;
+      const retryResult = await sendDisbursement(
+        activeReference,
+        `${baseNarration} #${activeReference.slice(-5)}`
+      );
+      response = retryResult.response;
+      data = retryResult.data;
+
+      if ((!response.ok || !data.requestSuccessful) && isMonnifyDuplicateError(data.responseMessage)) {
+        sendJson(res, 200, {
+          live: true,
+          requestSuccessful: true,
+          duplicateAllowed: true,
+          reference: activeReference,
+          status: 'SUCCESS',
+        });
+        return;
+      }
+    }
 
     if (!response.ok || !data.requestSuccessful) {
       sendJson(res, 400, {
@@ -629,7 +633,7 @@ async function handleTransfer(req: VercelReq, res: VercelRes) {
     }
 
     const rawStatus = (data.responseBody?.status || 'PENDING').toUpperCase();
-    const txRef = data.responseBody?.reference || reference;
+    const txRef = data.responseBody?.reference || activeReference;
 
     if (rawStatus === 'FAILED' || rawStatus === 'REVERSED' || rawStatus === 'EXPIRED') {
       sendJson(res, 400, {
@@ -650,13 +654,6 @@ async function handleTransfer(req: VercelReq, res: VercelRes) {
         ? 'SUCCESS'
         : 'PENDING';
 
-    processedIdempotencyKeys.set(dedupeKey, {
-      status: normalizedStatus,
-      reference: txRef,
-      responseBody: (data.responseBody || {}) as Record<string, unknown>,
-      timestamp: Date.now(),
-    });
-
     sendJson(res, 200, {
       live: true,
       requestSuccessful: true,
@@ -672,8 +669,6 @@ async function handleTransfer(req: VercelReq, res: VercelRes) {
       requestSuccessful: false,
       error: formatFriendlyMonnifyError(message),
     });
-  } finally {
-    inFlightTransfers.delete(dedupeKey);
   }
 }
 

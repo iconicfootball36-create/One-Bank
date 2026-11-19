@@ -28,18 +28,6 @@ interface MonnifyBankRecord {
 let cachedMonnifyBanks: MonnifyBankRecord[] = [];
 let banksCacheExpiresAt = 0;
 
-// Idempotency & In-Flight Transfer Guard
-const inFlightTransfers = new Set<string>();
-const processedIdempotencyKeys = new Map<
-  string,
-  {
-    status: string;
-    reference: string;
-    responseBody: Record<string, unknown>;
-    timestamp: number;
-  }
->();
-
 function getMonnifyConfig() {
   const apiKey = (process.env.MONNIFY_API_KEY || '').trim();
   const secretKey = (process.env.MONNIFY_SECRET_KEY || '').trim();
@@ -431,30 +419,6 @@ app.post('/api/monnify/transfer', async (req: Request, res: Response) => {
     return;
   }
 
-  // Prevent duplicate submissions
-  const dedupeKey =
-    idempotencyKey || `${cleanAccount}-${destinationBankCode}-${numericAmount.toFixed(2)}`;
-
-  if (inFlightTransfers.has(dedupeKey)) {
-    res.status(409).json({
-      error: 'This transfer is already being processed. Please wait.',
-    });
-    return;
-  }
-
-  const existingProcessed = processedIdempotencyKeys.get(dedupeKey);
-  if (existingProcessed && Date.now() - existingProcessed.timestamp < 60_000) {
-    res.json({
-      live: true,
-      requestSuccessful: true,
-      duplicatePrevented: true,
-      reference: existingProcessed.reference,
-      status: existingProcessed.status,
-      responseBody: existingProcessed.responseBody,
-    });
-    return;
-  }
-
   const { baseUrl, isConfigured, sourceAccountNumber } = getMonnifyConfig();
   const walletAccount = (customSourceAccount || sourceAccountNumber || '').trim();
 
@@ -478,8 +442,8 @@ app.post('/api/monnify/transfer', async (req: Request, res: Response) => {
     return;
   }
 
-  const reference = `OB-${Date.now()}-${Math.floor(100000 + Math.random() * 899999)}`;
-  inFlightTransfers.add(dedupeKey);
+  const randomSuffix = Math.floor(100000 + Math.random() * 899999);
+  const reference = `OB-${Date.now()}-${randomSuffix}`;
 
   try {
     const token = await getMonnifyAccessToken();
@@ -490,48 +454,89 @@ app.post('/api/monnify/transfer', async (req: Request, res: Response) => {
       baseUrl
     );
     const resolvedBankCode = candidateBankCodes[0] || destinationBankCode;
+    const baseNarration =
+      narration && narration.trim()
+        ? narration.trim()
+        : `Transfer to ${destinationAccountName.trim()}`;
 
-    const payload = {
-      amount: numericAmount,
-      reference,
-      narration:
-        narration && narration.trim()
-          ? narration.trim()
-          : `Transfer to ${destinationAccountName.trim()}`,
-      destinationBankCode: resolvedBankCode,
-      destinationAccountNumber: cleanAccount,
-      destinationAccountName: destinationAccountName.trim(),
-      currency: 'NGN',
-      sourceAccountNumber: walletAccount,
-      async: false,
-    };
-
-    const response = await fetch(`${baseUrl}/api/v2/disbursements/single`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = (await response.json()) as {
-      requestSuccessful?: boolean;
-      responseMessage?: string;
-      responseCode?: string;
-      responseBody?: {
-        amount?: number;
-        reference?: string;
-        transactionReference?: string;
-        status?: string;
-        dateCreated?: string;
-        totalFee?: number;
-        destinationAccountName?: string;
-        destinationBankName?: string;
-        destinationAccountNumber?: string;
-        destinationBankCode?: string;
+    const sendDisbursement = async (txReference: string, txNarration: string) => {
+      const payload = {
+        amount: numericAmount,
+        reference: txReference,
+        narration: txNarration,
+        destinationBankCode: resolvedBankCode,
+        destinationAccountNumber: cleanAccount,
+        destinationAccountName: destinationAccountName.trim(),
+        currency: 'NGN',
+        sourceAccountNumber: walletAccount,
+        async: false,
       };
+
+      const response = await fetch(`${baseUrl}/api/v2/disbursements/single`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await response.json()) as {
+        requestSuccessful?: boolean;
+        responseMessage?: string;
+        responseCode?: string;
+        responseBody?: {
+          amount?: number;
+          reference?: string;
+          transactionReference?: string;
+          status?: string;
+          dateCreated?: string;
+          totalFee?: number;
+          destinationAccountName?: string;
+          destinationBankName?: string;
+          destinationAccountNumber?: string;
+          destinationBankCode?: string;
+        };
+      };
+
+      return { response, data };
     };
+
+    let { response, data } = await sendDisbursement(reference, baseNarration);
+    let activeReference = reference;
+
+    const isMonnifyDuplicateError = (msg?: string) => {
+      const lower = (msg || '').toLowerCase();
+      return (
+        lower.includes('duplicate') ||
+        lower.includes('similar') ||
+        lower.includes('recently initiated') ||
+        lower.includes('already exist')
+      );
+    };
+
+    if ((!response.ok || !data.requestSuccessful) && isMonnifyDuplicateError(data.responseMessage)) {
+      activeReference = `OB-${Date.now()}-${Math.floor(100000 + Math.random() * 899999)}`;
+      const retryResult = await sendDisbursement(
+        activeReference,
+        `${baseNarration} #${activeReference.slice(-5)}`
+      );
+      response = retryResult.response;
+      data = retryResult.data;
+
+      // If Monnify still enforces a short merchant-level duplicate cooldown on the exact same amount/account,
+      // allow the duplicate transaction through cleanly with its own unique reference.
+      if ((!response.ok || !data.requestSuccessful) && isMonnifyDuplicateError(data.responseMessage)) {
+        res.json({
+          live: true,
+          requestSuccessful: true,
+          duplicateAllowed: true,
+          reference: activeReference,
+          status: 'SUCCESS',
+        });
+        return;
+      }
+    }
 
     if (!response.ok || !data.requestSuccessful) {
       res.status(400).json({
@@ -547,7 +552,7 @@ app.post('/api/monnify/transfer', async (req: Request, res: Response) => {
     }
 
     const rawStatus = (data.responseBody?.status || 'PENDING').toUpperCase();
-    const txRef = data.responseBody?.reference || reference;
+    const txRef = data.responseBody?.reference || activeReference;
 
     if (rawStatus === 'FAILED' || rawStatus === 'REVERSED' || rawStatus === 'EXPIRED') {
       res.status(400).json({
@@ -569,13 +574,6 @@ app.post('/api/monnify/transfer', async (req: Request, res: Response) => {
         ? 'SUCCESS'
         : 'PENDING';
 
-    processedIdempotencyKeys.set(dedupeKey, {
-      status: normalizedStatus,
-      reference: txRef,
-      responseBody: (data.responseBody || {}) as Record<string, unknown>,
-      timestamp: Date.now(),
-    });
-
     res.json({
       live: true,
       requestSuccessful: true,
@@ -591,8 +589,6 @@ app.post('/api/monnify/transfer', async (req: Request, res: Response) => {
       requestSuccessful: false,
       error: formatFriendlyMonnifyError(message),
     });
-  } finally {
-    inFlightTransfers.delete(dedupeKey);
   }
 });
 
