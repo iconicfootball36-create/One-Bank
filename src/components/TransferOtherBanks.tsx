@@ -16,6 +16,7 @@ interface TransferOtherBanksProps {
   recipientAccount: string;
   recipientName: string;
   isAccountVerified: boolean;
+  nameEnquiryUnavailable?: boolean;
   selectedBank: BankOption | null;
   availableBanks?: BankOption[];
   isResolvingAccount?: boolean;
@@ -26,6 +27,7 @@ interface TransferOtherBanksProps {
   showBankModal: boolean;
   onChangeAmount: (val: string) => void;
   onChangeRecipientAccount: (val: string) => void;
+  onChangeRecipientName?: (val: string) => void;
   onSelectBank: (bank: BankOption) => void;
   onSelectBeneficiary: (ben: Beneficiary) => void;
   onChangeNarration: (val: string) => void;
@@ -44,6 +46,7 @@ export const TransferOtherBanks: React.FC<TransferOtherBanksProps> = ({
   recipientAccount,
   recipientName,
   isAccountVerified,
+  nameEnquiryUnavailable = false,
   selectedBank,
   availableBanks = NIGERIAN_BANKS,
   isResolvingAccount = false,
@@ -54,6 +57,7 @@ export const TransferOtherBanks: React.FC<TransferOtherBanksProps> = ({
   showBankModal,
   onChangeAmount,
   onChangeRecipientAccount,
+  onChangeRecipientName,
   onSelectBank,
   onSelectBeneficiary,
   onChangeNarration,
@@ -79,10 +83,18 @@ export const TransferOtherBanks: React.FC<TransferOtherBanksProps> = ({
       return topFiveDefaultBanks;
     }
     const q = bankSearchQuery.trim().toLowerCase();
+    const compactQ = q.replace(/[^a-z0-9]/g, '');
     if (!q) return availableBanks;
-    return availableBanks.filter(
-      (b) => b.name.toLowerCase().includes(q) || b.code.toLowerCase().includes(q)
-    );
+    return availableBanks.filter((b) => {
+      const lowerName = b.name.toLowerCase();
+      const compactName = lowerName.replace(/[^a-z0-9]/g, '');
+      return (
+        lowerName.includes(q) ||
+        (compactQ.length > 0 && compactName.includes(compactQ)) ||
+        b.code.toLowerCase().includes(q) ||
+        (b.nipBankCode && b.nipBankCode.toLowerCase().includes(q))
+      );
+    });
   })();
 
   const handleAccountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,7 +124,12 @@ export const TransferOtherBanks: React.FC<TransferOtherBanksProps> = ({
       return;
     }
 
-    if (!isAccountVerified || !recipientName.trim() || accountResolutionError) {
+    if (nameEnquiryUnavailable) {
+      if (recipientName.trim().length < 2) {
+        setFormValidationError("Please enter the recipient's account name to continue.");
+        return;
+      }
+    } else if (!isAccountVerified || !recipientName.trim() || accountResolutionError) {
       setFormValidationError(
         accountResolutionError ||
           'Recipient account could not be verified. Please check the account number and selected bank.'
@@ -288,7 +305,7 @@ export const TransferOtherBanks: React.FC<TransferOtherBanksProps> = ({
 
             {selectedBank && (
               <div className="mt-2.5 flex items-center justify-between bg-[#F9FAFB] px-3 py-2.5 rounded-lg border border-[#E5E7EB]">
-                <div className="pr-2">
+                <div className="pr-2 flex-1">
                   <div className="text-[11.5px] font-semibold text-[#4F8D9E]">
                     {selectedBank.name}
                   </div>
@@ -300,6 +317,22 @@ export const TransferOtherBanks: React.FC<TransferOtherBanksProps> = ({
                     <div className="text-[12px] font-medium text-[#D92027] mt-0.5">
                       {accountResolutionError}
                     </div>
+                  ) : nameEnquiryUnavailable ? (
+                    <div className="mt-1.5">
+                      <div className="text-[11.5px] font-medium text-[#B45309] mb-1">
+                        Name enquiry is temporarily unavailable for this bank. Enter recipient name:
+                      </div>
+                      <input
+                        type="text"
+                        value={recipientName}
+                        onChange={(e) => {
+                          setFormValidationError(null);
+                          onChangeRecipientName?.(e.target.value.toUpperCase());
+                        }}
+                        placeholder="ENTER RECIPIENT FULL NAME"
+                        className="w-full px-2.5 py-2 rounded-lg border border-[#D1D5DB] bg-white text-[13px] font-semibold text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:border-[#4F8D9E]"
+                      />
+                    </div>
                   ) : isAccountVerified && recipientName ? (
                     <div className="text-[12.5px] font-bold text-[#111827] mt-0.5">
                       {recipientName}
@@ -310,8 +343,8 @@ export const TransferOtherBanks: React.FC<TransferOtherBanksProps> = ({
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {accountResolutionError && onRetryAccountValidation && (
+                <div className="flex items-center gap-2 shrink-0 self-start mt-0.5">
+                  {(accountResolutionError || nameEnquiryUnavailable) && onRetryAccountValidation && (
                     <button
                       type="button"
                       onClick={onRetryAccountValidation}

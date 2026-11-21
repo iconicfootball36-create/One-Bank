@@ -229,6 +229,7 @@ export default function App() {
   const [recipientAccount, setRecipientAccount] = useState<string>('');
   const [recipientName, setRecipientName] = useState<string>('');
   const [isAccountVerified, setIsAccountVerified] = useState<boolean>(false);
+  const [nameEnquiryUnavailable, setNameEnquiryUnavailable] = useState<boolean>(false);
   const [selectedBank, setSelectedBank] = useState<BankOption | null>(null);
   const [availableBanks, setAvailableBanks] = useState<BankOption[]>(NIGERIAN_BANKS);
   const [isResolvingAccount, setIsResolvingAccount] = useState<boolean>(false);
@@ -363,6 +364,28 @@ export default function App() {
           const remainingBanks = liveBanks.filter(
             (lb) => !updatedTopFive.some((t) => t.code === lb.code || t.name === lb.name)
           );
+          const priorityPatterns = [
+            'MONIEPOINT',
+            'KUDA',
+            'GUARANTY TRUST',
+            'ACCESS BANK',
+            'ZENITH',
+            'UNITED BANK FOR AFRICA',
+            'FIRST BANK OF NIGERIA',
+            'FIDELITY',
+            'FIRST CITY MONUMENT',
+            'WEMA BANK',
+            'STANBIC IBTC',
+            'STERLING BANK',
+          ];
+          remainingBanks.sort((a, b) => {
+            const aIdx = priorityPatterns.findIndex((p) => a.name.includes(p));
+            const bIdx = priorityPatterns.findIndex((p) => b.name.includes(p));
+            if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+            if (aIdx !== -1) return -1;
+            if (bIdx !== -1) return 1;
+            return a.name.localeCompare(b.name);
+          });
           setAvailableBanks([...updatedTopFive, ...remainingBanks]);
         }
       } catch {
@@ -379,6 +402,7 @@ export default function App() {
   useEffect(() => {
     if (recipientAccount.length !== 10 || !selectedBank) {
       setIsAccountVerified(false);
+      setNameEnquiryUnavailable(false);
       setAccountResolutionError(null);
       if (recipientAccount.length < 10) {
         setRecipientName('');
@@ -390,6 +414,7 @@ export default function App() {
     async function resolveAccountWithMonnify() {
       setIsResolvingAccount(true);
       setIsAccountVerified(false);
+      setNameEnquiryUnavailable(false);
       setAccountResolutionError(null);
 
       try {
@@ -402,9 +427,12 @@ export default function App() {
         const rawText = await res.text();
         let data: {
           live?: boolean;
+          verified?: boolean;
+          nameEnquiryUnavailable?: boolean;
           accountName?: string | null;
           bankCode?: string;
           error?: string;
+          message?: string;
         } = {};
         if (rawText) {
           try {
@@ -419,14 +447,23 @@ export default function App() {
         if (res.ok && data.accountName) {
           setRecipientName(data.accountName);
           setIsAccountVerified(true);
+          setNameEnquiryUnavailable(false);
           setAccountResolutionError(null);
           // If the backend resolved a specific canonical Monnify bankCode (e.g. 305 for OPay), update selectedBank
+          if (data.bankCode && data.bankCode !== selectedBank!.code) {
+            setSelectedBank((prev) => (prev ? { ...prev, code: data.bankCode! } : prev));
+          }
+        } else if (res.ok && data.nameEnquiryUnavailable) {
+          setIsAccountVerified(false);
+          setNameEnquiryUnavailable(true);
+          setAccountResolutionError(null);
           if (data.bankCode && data.bankCode !== selectedBank!.code) {
             setSelectedBank((prev) => (prev ? { ...prev, code: data.bankCode! } : prev));
           }
         } else {
           setRecipientName('');
           setIsAccountVerified(false);
+          setNameEnquiryUnavailable(false);
           setAccountResolutionError(
             data.error || 'Could not verify account number with the selected bank.'
           );
@@ -435,6 +472,7 @@ export default function App() {
         if (!cancelled) {
           setRecipientName('');
           setIsAccountVerified(false);
+          setNameEnquiryUnavailable(false);
           setAccountResolutionError(
             'Network error while validating account. Please check your connection and retry.'
           );
@@ -505,7 +543,7 @@ export default function App() {
     if (parsed > balance) {
       return;
     }
-    if (!selectedBank || !isAccountVerified || !recipientName.trim()) {
+    if (!selectedBank || (!isAccountVerified && !nameEnquiryUnavailable) || recipientName.trim().length < 2) {
       return;
     }
 
@@ -590,7 +628,7 @@ export default function App() {
       );
       return;
     }
-    if (!selectedBank || !isAccountVerified || !recipientName.trim()) {
+    if (!selectedBank || (!isAccountVerified && !nameEnquiryUnavailable) || recipientName.trim().length < 2) {
       setTransferError('Recipient account has not been verified.');
       return;
     }
@@ -838,6 +876,7 @@ export default function App() {
             recipientAccount={recipientAccount}
             recipientName={recipientName}
             isAccountVerified={isAccountVerified}
+            nameEnquiryUnavailable={nameEnquiryUnavailable}
             selectedBank={selectedBank}
             availableBanks={availableBanks}
             isResolvingAccount={isResolvingAccount}
@@ -849,6 +888,9 @@ export default function App() {
             onChangeAmount={setAmountInput}
             onChangeRecipientAccount={(acc) => {
               setRecipientAccount(acc);
+            }}
+            onChangeRecipientName={(name) => {
+              setRecipientName(name);
             }}
             onSelectBank={(bank) => {
               setSelectedBank(bank);

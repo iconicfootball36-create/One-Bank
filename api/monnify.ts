@@ -261,6 +261,13 @@ async function resolveCandidateBankCodes(
     requestedBankCode === '999991' ||
     requestedBankCode === '100033';
 
+  const isMoniepoint =
+    upperName.includes('MONIEPOINT') ||
+    upperName.includes('MONIE POINT') ||
+    upperName.includes('TEAMAPT') ||
+    requestedBankCode === '50515' ||
+    requestedBankCode === '090405';
+
   try {
     const directory = await fetchMonnifyBankDirectory(token, baseUrl);
     if (directory.length > 0) {
@@ -271,6 +278,7 @@ async function resolveCandidateBankCodes(
           bank.nipBankCode === requestedBankCode ||
           (isOpay && (bName.includes('OPAY') || bName.includes('PAYCOM'))) ||
           (isPalmpay && bName.includes('PALMPAY')) ||
+          (isMoniepoint && bName.includes('MONIEPOINT')) ||
           (upperName && bName === upperName)
         ) {
           addCandidate(bank.code);
@@ -292,6 +300,10 @@ async function resolveCandidateBankCodes(
   if (isPalmpay) {
     addCandidate('999991');
     addCandidate('100033');
+  }
+  if (isMoniepoint) {
+    addCandidate('50515');
+    addCandidate('090405');
   }
 
   return candidates;
@@ -384,6 +396,7 @@ async function handleValidateAccount(params: URLSearchParams, res: VercelRes) {
     ];
 
     let lastErrorMessage = 'Could not verify account number with the selected bank.';
+    let sawSwitchUnavailableError = false;
 
     for (const endpointPath of validationEndpoints) {
       let endpointDeprecated = false;
@@ -415,6 +428,7 @@ async function handleValidateAccount(params: URLSearchParams, res: VercelRes) {
         if (response.ok && data.requestSuccessful && data.responseBody?.accountName) {
           sendJson(res, 200, {
             live: true,
+            verified: true,
             accountNumber: data.responseBody.accountNumber || accountNumber,
             accountName: data.responseBody.accountName.trim().toUpperCase(),
             bankCode: data.responseBody.bankCode || candidateCode,
@@ -423,9 +437,20 @@ async function handleValidateAccount(params: URLSearchParams, res: VercelRes) {
         }
 
         const rawMsg = data.responseMessage || '';
-        if (rawMsg.toLowerCase().includes('deprecated')) {
+        const lowerMsg = rawMsg.toLowerCase();
+        if (lowerMsg.includes('deprecated')) {
           endpointDeprecated = true;
           break;
+        }
+
+        if (
+          response.status >= 500 ||
+          lowerMsg.includes('unable to process request at the moment') ||
+          lowerMsg.includes('temporarily unavailable') ||
+          lowerMsg.includes('service unavailable') ||
+          lowerMsg.includes('timeout')
+        ) {
+          sawSwitchUnavailableError = true;
         }
 
         if (rawMsg) {
@@ -438,6 +463,19 @@ async function handleValidateAccount(params: URLSearchParams, res: VercelRes) {
       if (!endpointDeprecated) {
         break;
       }
+    }
+
+    if (sawSwitchUnavailableError) {
+      sendJson(res, 200, {
+        live: true,
+        verified: false,
+        nameEnquiryUnavailable: true,
+        accountNumber,
+        bankCode: candidateBankCodes[0] || bankCode,
+        message:
+          'Name enquiry is temporarily unavailable for this bank. Enter the recipient name below to continue.',
+      });
+      return;
     }
 
     sendJson(res, 400, {
@@ -536,18 +574,23 @@ async function handleTransfer(req: VercelReq, res: VercelRes) {
       token,
       baseUrl
     );
-    const resolvedBankCode = candidateBankCodes[0] || destinationBankCode;
+    const bankCodesToTry =
+      candidateBankCodes.length > 0 ? candidateBankCodes : [destinationBankCode];
     const baseNarration =
       narration && narration.trim()
         ? narration.trim()
         : `Transfer to ${destinationAccountName.trim()}`;
 
-    const sendDisbursement = async (txReference: string, txNarration: string) => {
+    const sendDisbursement = async (
+      txReference: string,
+      txNarration: string,
+      bankCodeToUse: string
+    ) => {
       const payload = {
         amount: numericAmount,
         reference: txReference,
         narration: txNarration,
-        destinationBankCode: resolvedBankCode,
+        destinationBankCode: bankCodeToUse,
         destinationAccountNumber: cleanAccount,
         destinationAccountName: destinationAccountName.trim(),
         currency: 'NGN',
@@ -585,9 +628,6 @@ async function handleTransfer(req: VercelReq, res: VercelRes) {
       return { response, data };
     };
 
-    let { response, data } = await sendDisbursement(reference, baseNarration);
-    let activeReference = reference;
-
     const isMonnifyDuplicateError = (msg?: string) => {
       const lower = (msg || '').toLowerCase();
       return (
@@ -598,11 +638,42 @@ async function handleTransfer(req: VercelReq, res: VercelRes) {
       );
     };
 
+    const isMonnifyBankCodeError = (msg?: string) => {
+      const lower = (msg || '').toLowerCase();
+      return (
+        (lower.includes('invalid') && lower.includes('bank')) ||
+        lower.includes('bank code') ||
+        lower.includes('destination bank')
+      );
+    };
+
+    let activeBankCode = bankCodesToTry[0];
+    let activeReference = reference;
+    let { response, data } = await sendDisbursement(activeReference, baseNarration, activeBankCode);
+
+    if ((!response.ok || !data.requestSuccessful) && isMonnifyBankCodeError(data.responseMessage)) {
+      for (const fallbackCode of bankCodesToTry.slice(1)) {
+        activeBankCode = fallbackCode;
+        activeReference = `OB-${Date.now()}-${Math.floor(100000 + Math.random() * 899999)}`;
+        const retryBankResult = await sendDisbursement(
+          activeReference,
+          baseNarration,
+          activeBankCode
+        );
+        response = retryBankResult.response;
+        data = retryBankResult.data;
+        if (response.ok && data.requestSuccessful) {
+          break;
+        }
+      }
+    }
+
     if ((!response.ok || !data.requestSuccessful) && isMonnifyDuplicateError(data.responseMessage)) {
       activeReference = `OB-${Date.now()}-${Math.floor(100000 + Math.random() * 899999)}`;
       const retryResult = await sendDisbursement(
         activeReference,
-        `${baseNarration} #${activeReference.slice(-5)}`
+        `${baseNarration} #${activeReference.slice(-5)}`,
+        activeBankCode
       );
       response = retryResult.response;
       data = retryResult.data;

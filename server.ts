@@ -172,6 +172,13 @@ async function resolveCandidateBankCodes(
     requestedBankCode === '999991' ||
     requestedBankCode === '100033';
 
+  const isMoniepoint =
+    upperName.includes('MONIEPOINT') ||
+    upperName.includes('MONIE POINT') ||
+    upperName.includes('TEAMAPT') ||
+    requestedBankCode === '50515' ||
+    requestedBankCode === '090405';
+
   // Consult live Monnify /api/v1/banks directory first so we use the exact code Monnify expects
   try {
     const directory = await fetchMonnifyBankDirectory(token, baseUrl);
@@ -183,6 +190,7 @@ async function resolveCandidateBankCodes(
           bank.nipBankCode === requestedBankCode ||
           (isOpay && (bName.includes('OPAY') || bName.includes('PAYCOM'))) ||
           (isPalmpay && bName.includes('PALMPAY')) ||
+          (isMoniepoint && bName.includes('MONIEPOINT')) ||
           (upperName && bName === upperName)
         ) {
           addCandidate(bank.code);
@@ -204,6 +212,10 @@ async function resolveCandidateBankCodes(
   if (isPalmpay) {
     addCandidate('999991');
     addCandidate('100033');
+  }
+  if (isMoniepoint) {
+    addCandidate('50515');
+    addCandidate('090405');
   }
 
   return candidates;
@@ -302,6 +314,7 @@ app.get('/api/monnify/validate-account', async (req: Request, res: Response) => 
     ];
 
     let lastErrorMessage = 'Could not verify account number with the selected bank.';
+    let sawSwitchUnavailableError = false;
 
     for (const endpointPath of validationEndpoints) {
       let endpointDeprecated = false;
@@ -333,6 +346,7 @@ app.get('/api/monnify/validate-account', async (req: Request, res: Response) => 
         if (response.ok && data.requestSuccessful && data.responseBody?.accountName) {
           res.json({
             live: true,
+            verified: true,
             accountNumber: data.responseBody.accountNumber || accountNumber,
             accountName: data.responseBody.accountName.trim().toUpperCase(),
             bankCode: data.responseBody.bankCode || candidateCode,
@@ -341,9 +355,20 @@ app.get('/api/monnify/validate-account', async (req: Request, res: Response) => 
         }
 
         const rawMsg = data.responseMessage || '';
-        if (rawMsg.toLowerCase().includes('deprecated')) {
+        const lowerMsg = rawMsg.toLowerCase();
+        if (lowerMsg.includes('deprecated')) {
           endpointDeprecated = true;
           break; // Immediately switch to the other endpoint version
+        }
+
+        if (
+          response.status >= 500 ||
+          lowerMsg.includes('unable to process request at the moment') ||
+          lowerMsg.includes('temporarily unavailable') ||
+          lowerMsg.includes('service unavailable') ||
+          lowerMsg.includes('timeout')
+        ) {
+          sawSwitchUnavailableError = true;
         }
 
         if (rawMsg) {
@@ -355,6 +380,19 @@ app.get('/api/monnify/validate-account', async (req: Request, res: Response) => 
         // Endpoint itself was active and not deprecated; no need to call deprecated fallback
         break;
       }
+    }
+
+    if (sawSwitchUnavailableError) {
+      res.status(200).json({
+        live: true,
+        verified: false,
+        nameEnquiryUnavailable: true,
+        accountNumber,
+        bankCode: candidateBankCodes[0] || bankCode,
+        message:
+          'Name enquiry is temporarily unavailable for this bank. Enter the recipient name below to continue.',
+      });
+      return;
     }
 
     res.status(400).json({
@@ -453,18 +491,23 @@ app.post('/api/monnify/transfer', async (req: Request, res: Response) => {
       token,
       baseUrl
     );
-    const resolvedBankCode = candidateBankCodes[0] || destinationBankCode;
+    const bankCodesToTry =
+      candidateBankCodes.length > 0 ? candidateBankCodes : [destinationBankCode];
     const baseNarration =
       narration && narration.trim()
         ? narration.trim()
         : `Transfer to ${destinationAccountName.trim()}`;
 
-    const sendDisbursement = async (txReference: string, txNarration: string) => {
+    const sendDisbursement = async (
+      txReference: string,
+      txNarration: string,
+      bankCodeToUse: string
+    ) => {
       const payload = {
         amount: numericAmount,
         reference: txReference,
         narration: txNarration,
-        destinationBankCode: resolvedBankCode,
+        destinationBankCode: bankCodeToUse,
         destinationAccountNumber: cleanAccount,
         destinationAccountName: destinationAccountName.trim(),
         currency: 'NGN',
@@ -502,9 +545,6 @@ app.post('/api/monnify/transfer', async (req: Request, res: Response) => {
       return { response, data };
     };
 
-    let { response, data } = await sendDisbursement(reference, baseNarration);
-    let activeReference = reference;
-
     const isMonnifyDuplicateError = (msg?: string) => {
       const lower = (msg || '').toLowerCase();
       return (
@@ -515,11 +555,43 @@ app.post('/api/monnify/transfer', async (req: Request, res: Response) => {
       );
     };
 
+    const isMonnifyBankCodeError = (msg?: string) => {
+      const lower = (msg || '').toLowerCase();
+      return (
+        (lower.includes('invalid') && lower.includes('bank')) ||
+        lower.includes('bank code') ||
+        lower.includes('destination bank')
+      );
+    };
+
+    let activeBankCode = bankCodesToTry[0];
+    let activeReference = reference;
+    let { response, data } = await sendDisbursement(activeReference, baseNarration, activeBankCode);
+
+    // If Monnify rejects the primary bank code (e.g. NIBSS vs NIP code), try remaining candidate codes
+    if ((!response.ok || !data.requestSuccessful) && isMonnifyBankCodeError(data.responseMessage)) {
+      for (const fallbackCode of bankCodesToTry.slice(1)) {
+        activeBankCode = fallbackCode;
+        activeReference = `OB-${Date.now()}-${Math.floor(100000 + Math.random() * 899999)}`;
+        const retryBankResult = await sendDisbursement(
+          activeReference,
+          baseNarration,
+          activeBankCode
+        );
+        response = retryBankResult.response;
+        data = retryBankResult.data;
+        if (response.ok && data.requestSuccessful) {
+          break;
+        }
+      }
+    }
+
     if ((!response.ok || !data.requestSuccessful) && isMonnifyDuplicateError(data.responseMessage)) {
       activeReference = `OB-${Date.now()}-${Math.floor(100000 + Math.random() * 899999)}`;
       const retryResult = await sendDisbursement(
         activeReference,
-        `${baseNarration} #${activeReference.slice(-5)}`
+        `${baseNarration} #${activeReference.slice(-5)}`,
+        activeBankCode
       );
       response = retryResult.response;
       data = retryResult.data;
